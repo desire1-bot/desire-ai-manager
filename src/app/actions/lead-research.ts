@@ -1,13 +1,13 @@
 "use server"
 
 import { randomUUID } from "node:crypto"
-import { and, eq, gte, inArray, sql, sum } from "drizzle-orm"
+import { and, eq, gte, inArray, or, sql, sum } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { requireCurrentUser } from "@/lib/crm/queries"
 import { db } from "@/lib/db"
 import { leadHunterSettings, leadProspects, leadResearchCandidates, leadResearchRuns } from "@/lib/db/schema"
-import { analyzeCompanySite, assertPublicResearchUrl, LeadResearchError, parseLeadResearchInput } from "@/lib/lead-research"
+import { analyzeCompanySource, assertPublicResearchUrl, fetchCompanySiteSource, LeadResearchError, parseLeadResearchInput, type LeadResearchSourceSnapshot } from "@/lib/lead-research"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const batchSchema = z.object({
@@ -164,11 +164,14 @@ export async function analyzeLeadResearchCandidate(candidateId: string) {
   const user = await requireCurrentUser()
 
   const [candidate] = await db.update(leadResearchCandidates)
-    .set({ status: "analyzing", errorMessage: null, updatedAt: new Date() })
+    .set({ status: "analyzing", errorMessage: null, retryable: false, updatedAt: new Date() })
     .where(and(
       eq(leadResearchCandidates.id, candidateId),
       eq(leadResearchCandidates.userId, user.id),
-      inArray(leadResearchCandidates.status, ["pending", "failed"]),
+      or(
+        eq(leadResearchCandidates.status, "pending"),
+        and(eq(leadResearchCandidates.status, "failed"), eq(leadResearchCandidates.retryable, true)),
+      ),
     ))
     .returning({
       id: leadResearchCandidates.id,
@@ -176,27 +179,81 @@ export async function analyzeLeadResearchCandidate(candidateId: string) {
       sourceUrl: leadResearchCandidates.sourceUrl,
       websiteDomain: leadResearchCandidates.websiteDomain,
       companyName: leadResearchCandidates.companyName,
+      sourceTitle: leadResearchCandidates.sourceTitle,
+      sourceRetrievedAt: leadResearchCandidates.sourceRetrievedAt,
+      sourceSnapshot: leadResearchCandidates.sourceSnapshot,
+      sourceFinalUrl: leadResearchCandidates.sourceFinalUrl,
+      sourceCheckStatus: leadResearchCandidates.sourceCheckStatus,
+      sourceCheckResults: leadResearchCandidates.sourceCheckResults,
+      retryCount: leadResearchCandidates.retryCount,
     })
 
   if (!candidate) {
-    const [existing] = await db.select({ status: leadResearchCandidates.status })
+    const [existing] = await db.select({ status: leadResearchCandidates.status, retryable: leadResearchCandidates.retryable })
       .from(leadResearchCandidates)
       .where(and(eq(leadResearchCandidates.id, candidateId), eq(leadResearchCandidates.userId, user.id)))
       .limit(1)
     if (!existing) return { ok: false as const, error: "Карточка исследования не найдена." }
+    if (existing.status === "failed" && !existing.retryable) {
+      return { ok: false as const, error: "Эта ошибка не исправится повторным запросом. Проверьте URL и правила доступа источника." }
+    }
     return { ok: false as const, error: "Эта карточка уже обрабатывается или не ожидает анализа." }
   }
 
   try {
-    const analysis = await analyzeCompanySite({
+    const cachedSource: LeadResearchSourceSnapshot | null = candidate.sourceSnapshot && candidate.sourceFinalUrl && candidate.sourceRetrievedAt && candidate.sourceCheckStatus === "passed"
+      ? {
+          sourceSnapshot: candidate.sourceSnapshot,
+          sourceFinalUrl: candidate.sourceFinalUrl,
+          sourceRetrievedAt: candidate.sourceRetrievedAt,
+          sourceTitle: candidate.sourceTitle,
+          sourceCheckResults: candidate.sourceCheckResults,
+        }
+      : null
+    const source = cachedSource ?? await fetchCompanySiteSource({
       sourceUrl: candidate.sourceUrl,
       websiteDomain: candidate.websiteDomain,
+    })
+
+    if (!cachedSource) {
+      await db.update(leadResearchCandidates).set({
+        sourceTitle: source.sourceTitle,
+        sourceRetrievedAt: source.sourceRetrievedAt,
+        sourceSnapshot: source.sourceSnapshot,
+        sourceFinalUrl: source.sourceFinalUrl,
+        sourceCheckStatus: "passed",
+        sourceCheckResults: source.sourceCheckResults,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(leadResearchCandidates.id, candidate.id),
+        eq(leadResearchCandidates.userId, user.id),
+        eq(leadResearchCandidates.status, "analyzing"),
+      ))
+    }
+
+    const analysis = await analyzeCompanySource({
+      sourceUrl: source.sourceFinalUrl,
+      sourceTitle: source.sourceTitle,
+      sourceRetrievedAt: source.sourceRetrievedAt,
+      sourceSnapshot: source.sourceSnapshot,
       companyName: candidate.companyName,
+      retryCount: candidate.retryCount,
+      onRetry: async (retryCount) => {
+        await db.update(leadResearchCandidates).set({ retryCount, updatedAt: new Date() }).where(and(
+          eq(leadResearchCandidates.id, candidate.id),
+          eq(leadResearchCandidates.userId, user.id),
+          eq(leadResearchCandidates.status, "analyzing"),
+        ))
+      },
     })
     await db.update(leadResearchCandidates).set({
       companyName: analysis.companyName,
       sourceTitle: analysis.sourceTitle,
       sourceRetrievedAt: analysis.sourceRetrievedAt,
+      sourceFinalUrl: source.sourceFinalUrl,
+      sourceSnapshot: source.sourceSnapshot,
+      sourceCheckStatus: "passed",
+      sourceCheckResults: source.sourceCheckResults,
       summary: analysis.summary,
       industry: analysis.industry,
       region: analysis.region,
@@ -206,6 +263,8 @@ export async function analyzeLeadResearchCandidate(candidateId: string) {
       proposalDraft: analysis.proposalDraft,
       status: "analyzed",
       errorMessage: null,
+      retryable: false,
+      retryCount: analysis.retryCount,
       modelId: analysis.modelId,
       analyzedAt: new Date(),
       updatedAt: new Date(),
@@ -215,12 +274,24 @@ export async function analyzeLeadResearchCandidate(candidateId: string) {
     revalidatePath("/leads")
     return { ok: true as const }
   } catch (error) {
-    const message = error instanceof LeadResearchError
-      ? error.message
-      : "Бесплатная AI-модель временно недоступна; платный резервный маршрут не используется."
+    const researchError = error instanceof LeadResearchError ? error : null
+    const message = researchError?.message ?? "Не удалось завершить анализ. Карточка осталась в очереди; платный резервный маршрут не используется."
+    const retryable = researchError?.retryable ?? false
+    const isSourceFailure = researchError?.stage === "source"
+    const sourceCheckStatus = isSourceFailure
+      ? retryable ? "temporary_error" as const : "blocked" as const
+      : candidate.sourceCheckStatus
+    const sourceCheckResults = isSourceFailure
+      ? { ...candidate.sourceCheckResults, checkedAt: new Date().toISOString(), error: message.slice(0, 500) }
+      : candidate.sourceCheckResults
+
     await db.update(leadResearchCandidates).set({
       status: "failed",
       errorMessage: message.slice(0, 500),
+      retryable,
+      retryCount: researchError?.retryCount ?? candidate.retryCount,
+      sourceCheckStatus,
+      sourceCheckResults,
       updatedAt: new Date(),
     }).where(and(eq(leadResearchCandidates.id, candidate.id), eq(leadResearchCandidates.userId, user.id)))
     revalidatePath("/leads")

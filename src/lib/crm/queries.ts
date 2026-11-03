@@ -3,7 +3,7 @@ import { headers } from "next/headers"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { companies, contacts, crmTasks, deals, leadHunterSettings, leadProspects, leadResearchCandidates, leadResearchRuns } from "@/lib/db/schema"
-import type { LeadResearchEvidence, LeadResearchOverview, LeadResearchStatus, LeadResearchSourceType } from "@/lib/lead-research-types"
+import type { LeadResearchEvidence, LeadResearchOverview, LeadResearchSourceCheckStatus, LeadResearchStatus, LeadResearchSourceType } from "@/lib/lead-research-types"
 
 export async function getCurrentUser() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -160,6 +160,10 @@ export async function getLeadResearchData(userId: string): Promise<LeadResearchO
       sourceTitle: leadResearchCandidates.sourceTitle,
       sourceType: leadResearchCandidates.sourceType,
       sourceRetrievedAt: leadResearchCandidates.sourceRetrievedAt,
+      sourceCheckStatus: leadResearchCandidates.sourceCheckStatus,
+      sourceCheckResults: leadResearchCandidates.sourceCheckResults,
+      retryCount: leadResearchCandidates.retryCount,
+      retryable: leadResearchCandidates.retryable,
       summary: leadResearchCandidates.summary,
       industry: leadResearchCandidates.industry,
       region: leadResearchCandidates.region,
@@ -205,7 +209,9 @@ export async function getLeadResearchData(userId: string): Promise<LeadResearchO
       ...candidate,
       sourceType: candidate.sourceType as LeadResearchSourceType,
       status: candidate.status as LeadResearchStatus,
+      sourceCheckStatus: candidate.sourceCheckStatus as LeadResearchSourceCheckStatus,
       evidence: (candidate.evidence ?? []) as LeadResearchEvidence[],
+      sourceCheckResults: candidate.sourceCheckResults ?? {},
       sourceRetrievedAt: candidate.sourceRetrievedAt?.toISOString() ?? null,
       analyzedAt: candidate.analyzedAt?.toISOString() ?? null,
       createdAt: candidate.createdAt.toISOString(),

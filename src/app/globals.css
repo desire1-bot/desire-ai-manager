@@ -627,6 +627,10 @@ a { color: inherit; text-decoration: none; }
 .research-state, .research-error { display: flex; align-items: center; gap: 7px; margin: 0; color: #708076; font-size: 10px; }
 .research-error { align-items: flex-start; color: #94554d; line-height: 1.5; }
 .research-error svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.research-cache-note { margin: 0; padding: 9px 11px; color: #49644f; background: #eff4ee; border-radius: 9px; font-size: 10px; line-height: 1.5; }
+.research-source-check { width: 100%; }
+.research-source-check ul { gap: 6px; }
+.research-source-check li { color: #69776e; line-height: 1.5; }
 .research-spinner { animation: research-spin 1s linear infinite; }
 @keyframes research-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .research-spinner { animation: none; } }

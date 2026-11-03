@@ -28,12 +28,12 @@ import type {
 } from "@/lib/lead-research-types"
 
 const statusLabels = {
-  pending: "В очереди",
-  analyzing: "Анализируется",
-  analyzed: "Ожидает проверки",
+  pending: "Ожидание",
+  analyzing: "Анализ",
+  analyzed: "Успешно",
   saved: "Сохранён в Lead Hunter",
   rejected: "Отклонён",
-  failed: "Нужен повтор",
+  failed: "Ошибка",
 } as const
 
 const sourceLabels: Record<LeadResearchSourceType, string> = {
@@ -209,11 +209,24 @@ function ResearchCandidateCard({ candidate }: { candidate: LeadResearchCandidate
           <h4>{displayName}</h4>
           <a href={candidate.sourceUrl} target="_blank" rel="noopener noreferrer">{candidate.websiteDomain}<ArrowUpRight aria-hidden="true" /></a>
         </div>
-        <span className="research-status" data-status={candidate.status}>{statusLabels[candidate.status]}</span>
+        <span className="research-status" data-status={candidate.status}>
+          {candidate.status === "failed" && candidate.retryable ? "Временная ошибка" : statusLabels[candidate.status]}
+        </span>
       </div>
 
-      {candidate.status === "analyzing" && <p className="research-state"><LoaderCircle className="research-spinner" aria-hidden="true" />Проверяем правила доступа и анализируем страницу…</p>}
+      {candidate.status === "pending" && <p className="research-state"><Clock3 aria-hidden="true" />Ожидает запуска. Анализ выполняется только вручную.</p>}
+      {candidate.status === "analyzing" && <p className="research-state"><LoaderCircle className="research-spinner" aria-hidden="true" />{candidate.sourceCheckStatus === "passed" ? "Анализируем сохранённый снимок сайта…" : "Проверяем доступ к источнику и анализируем страницу…"}</p>}
       {candidate.status === "failed" && <p className="research-error"><AlertCircle aria-hidden="true" />{candidate.errorMessage ?? "Анализ не завершился."}</p>}
+      {candidate.status === "failed" && candidate.retryable && candidate.sourceCheckStatus === "passed" && <p className="research-cache-note" role="status">Источник уже проверен. Повтор использует сохранённый снимок и не запрашивает сайт заново.</p>}
+      {candidate.sourceCheckStatus === "passed" && <details className="research-evidence research-source-check">
+        <summary>Результаты проверки источника</summary>
+        <ul>
+          <li>DNS: {candidate.sourceCheckResults.publicDns ? "адрес публичный" : "не подтверждён"}</li>
+          <li>robots.txt: {candidate.sourceCheckResults.robots === "allowed" ? "доступ разрешён" : candidate.sourceCheckResults.robots === "not_published" ? "файл не опубликован" : "нет данных"}</li>
+          <li>HTTP: {candidate.sourceCheckResults.contentType || "тип не определён"}; {candidate.sourceCheckResults.responseBytes ?? 0} байт; перенаправлений: {candidate.sourceCheckResults.redirectCount ?? 0}</li>
+          {candidate.sourceCheckResults.checkedAt && <li>Проверено {dateFormat.format(new Date(candidate.sourceCheckResults.checkedAt))}</li>}
+        </ul>
+      </details>}
 
       {isAnalyzed && <>
         <div className="research-analysis-top">
@@ -233,7 +246,7 @@ function ResearchCandidateCard({ candidate }: { candidate: LeadResearchCandidate
 
       {notice && <p className="research-card-notice" data-tone={notice.error ? "error" : "success"} role={notice.error ? "alert" : "status"}>{notice.text}</p>}
       <div className="research-card-actions">
-        {(candidate.status === "pending" || candidate.status === "failed") && <button type="button" className="primary-button" disabled={busy} onClick={() => runAction(() => analyzeLeadResearchCandidate(candidate.id), "AI-анализ завершён. Проверьте вывод и источники.")}>{busy ? <LoaderCircle className="research-spinner" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}{candidate.status === "failed" ? "Повторить анализ" : "Анализировать сайт"}</button>}
+        {(candidate.status === "pending" || candidate.status === "failed" && candidate.retryable) && <button type="button" className="primary-button" disabled={busy} onClick={() => runAction(() => analyzeLeadResearchCandidate(candidate.id), "AI-анализ завершён. Проверьте вывод и источники.")}>{busy ? <LoaderCircle className="research-spinner" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}{candidate.status === "failed" ? "Повторить анализ" : "Анализировать сайт"}</button>}
         {candidate.status === "analyzed" && <>
           <button type="button" className="secondary-button" disabled={busy || !proposal.trim()} onClick={() => runAction(() => saveLeadResearchDraft(candidate.id, proposal), "Черновик предложения сохранён.")}>{busy ? "Сохраняем…" : "Сохранить черновик"}</button>
           <button type="button" className="primary-button" disabled={busy || !proposal.trim()} onClick={() => runAction(() => saveLeadResearchCandidate(candidate.id, proposal), "Лид добавлен в Lead Hunter; перед квалификацией проверьте сайт вручную.")}>{busy ? "Сохраняем…" : "Сохранить как лид"}</button>

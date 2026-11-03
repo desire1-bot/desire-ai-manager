@@ -1,6 +1,6 @@
 import { date, integer, numeric, pgTable, text, timestamp, boolean, uniqueIndex, check, index, jsonb } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
-import type { LeadResearchEvidence } from "@/lib/lead-research-types"
+import type { LeadResearchEvidence, LeadResearchSourceCheckResults } from "@/lib/lead-research-types"
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -163,6 +163,12 @@ export const leadResearchCandidates = pgTable("lead_research_candidates", {
   sourceTitle: text("sourceTitle"),
   sourceType: text("sourceType").notNull().default("company_site"),
   sourceRetrievedAt: timestamp("sourceRetrievedAt", { withTimezone: true }),
+  sourceSnapshot: text("sourceSnapshot"),
+  sourceFinalUrl: text("sourceFinalUrl"),
+  sourceCheckStatus: text("sourceCheckStatus").notNull().default("unchecked"),
+  sourceCheckResults: jsonb("sourceCheckResults").$type<LeadResearchSourceCheckResults>().notNull().default({}),
+  retryCount: integer("retryCount").notNull().default(0),
+  retryable: boolean("retryable").notNull().default(false),
   summary: text("summary"),
   industry: text("industry"),
   region: text("region"),
@@ -182,6 +188,8 @@ export const leadResearchCandidates = pgTable("lead_research_candidates", {
   uniqueIndex("lead_research_candidates_user_domain_unique").on(table.userId, table.websiteDomain),
   index("lead_research_candidates_user_status_created_idx").on(table.userId, table.status, table.createdAt),
   check("lead_research_candidates_status_check", sql`${table.status} in ('pending', 'analyzing', 'analyzed', 'saved', 'rejected', 'failed')`),
+  check("lead_research_candidates_source_check_status", sql`${table.sourceCheckStatus} in ('unchecked', 'passed', 'blocked', 'temporary_error')`),
+  check("lead_research_candidates_retry_count", sql`${table.retryCount} >= 0`),
   check("lead_research_candidates_score_range", sql`${table.fitScore} is null or ${table.fitScore} between 0 and 100`),
   check("lead_research_candidates_source_type_check", sql`${table.sourceType} in ('company_site', 'licensed_directory')`),
 ])

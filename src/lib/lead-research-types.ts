@@ -2,6 +2,18 @@ export type LeadResearchSourceType = "company_site" | "licensed_directory"
 
 export type LeadResearchStatus = "pending" | "analyzing" | "analyzed" | "saved" | "rejected" | "failed"
 
+export type LeadResearchSourceCheckStatus = "unchecked" | "passed" | "blocked" | "temporary_error"
+
+export type LeadResearchSourceCheckResults = {
+  publicDns?: boolean
+  robots?: "allowed" | "not_published"
+  contentType?: string
+  responseBytes?: number
+  redirectCount?: number
+  checkedAt?: string
+  error?: string
+}
+
 export type LeadResearchEvidenceField = "companyName" | "industry" | "region" | "summary" | "fitRationale"
 
 export type LeadResearchEvidence = {
@@ -20,6 +32,10 @@ export type LeadResearchCandidateView = {
   sourceTitle: string | null
   sourceType: LeadResearchSourceType
   sourceRetrievedAt: string | null
+  sourceCheckStatus: LeadResearchSourceCheckStatus
+  sourceCheckResults: LeadResearchSourceCheckResults
+  retryCount: number
+  retryable: boolean
   summary: string | null
   industry: string | null
   region: string | null

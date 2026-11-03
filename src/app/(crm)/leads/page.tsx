@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: "Ручная проверка потенциальных рекламодателей по официальным и разрешённым источникам в DESIRE CRM.",
 }
 
+export const maxDuration = 120
+
 export default async function LeadsPage() {
   const user = await requireCurrentUser()
   const [{ leads, dailyTarget }, research] = await Promise.all([

@@ -1,5 +1,6 @@
-import { date, integer, numeric, pgTable, text, timestamp, boolean, uniqueIndex, check } from "drizzle-orm/pg-core"
+import { date, integer, numeric, pgTable, text, timestamp, boolean, uniqueIndex, check, index, jsonb } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
+import type { LeadResearchEvidence } from "@/lib/lead-research-types"
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -137,6 +138,52 @@ export const leadHunterSettings = pgTable("lead_hunter_settings", {
   updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("lead_hunter_daily_target_range", sql`${table.dailyTarget} between 20 and 50`),
+])
+
+export const leadResearchRuns = pgTable("lead_research_runs", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  requestedCount: integer("requestedCount").notNull(),
+  status: text("status").notNull().default("open"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("lead_research_runs_user_created_idx").on(table.userId, table.createdAt),
+  check("lead_research_runs_requested_count_range", sql`${table.requestedCount} between 1 and 50`),
+  check("lead_research_runs_status_check", sql`${table.status} in ('open', 'completed')`),
+])
+
+export const leadResearchCandidates = pgTable("lead_research_candidates", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  runId: text("runId").notNull(),
+  companyName: text("companyName"),
+  sourceUrl: text("sourceUrl").notNull(),
+  websiteDomain: text("websiteDomain").notNull(),
+  sourceTitle: text("sourceTitle"),
+  sourceType: text("sourceType").notNull().default("company_site"),
+  sourceRetrievedAt: timestamp("sourceRetrievedAt", { withTimezone: true }),
+  summary: text("summary"),
+  industry: text("industry"),
+  region: text("region"),
+  fitScore: integer("fitScore"),
+  fitRationale: text("fitRationale"),
+  evidence: jsonb("evidence").$type<LeadResearchEvidence[]>().notNull().default([]),
+  proposalDraft: text("proposalDraft"),
+  status: text("status").notNull().default("pending"),
+  errorMessage: text("errorMessage"),
+  modelId: text("modelId"),
+  analyzedAt: timestamp("analyzedAt", { withTimezone: true }),
+  leadProspectId: text("leadProspectId"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("lead_research_candidates_unique_domain_per_run").on(table.userId, table.runId, table.websiteDomain),
+  uniqueIndex("lead_research_candidates_user_domain_unique").on(table.userId, table.websiteDomain),
+  index("lead_research_candidates_user_status_created_idx").on(table.userId, table.status, table.createdAt),
+  check("lead_research_candidates_status_check", sql`${table.status} in ('pending', 'analyzing', 'analyzed', 'saved', 'rejected', 'failed')`),
+  check("lead_research_candidates_score_range", sql`${table.fitScore} is null or ${table.fitScore} between 0 and 100`),
+  check("lead_research_candidates_source_type_check", sql`${table.sourceType} in ('company_site', 'licensed_directory')`),
 ])
 
 export const telegramSettings = pgTable("telegram_settings", {

@@ -20,6 +20,8 @@ import {
   Trash2,
   X,
 } from "lucide-react"
+import { LeadResearchPanel } from "@/components/lead-research-panel"
+import type { LeadResearchOverview } from "@/lib/lead-research-types"
 import {
   convertLeadToCompany,
   createLeadProspect,
@@ -51,7 +53,7 @@ export type LeadProspect = {
   companyId: string | null
 }
 
-type Props = { leads: LeadProspect[]; dailyTarget: number }
+type Props = { leads: LeadProspect[]; dailyTarget: number; research: LeadResearchOverview }
 type Filter = "all" | LeadStatus
 
 const statusLabels: Record<LeadStatus, string> = {
@@ -79,7 +81,7 @@ function formatDate(value: string) {
   return dateFormat.format(new Date(value))
 }
 
-export function LeadHunter({ leads, dailyTarget }: Props) {
+export function LeadHunter({ leads, dailyTarget, research }: Props) {
   const router = useRouter()
   const [showForm, setShowForm] = useState(false)
   const [search, setSearch] = useState("")
@@ -187,6 +189,8 @@ export function LeadHunter({ leads, dailyTarget }: Props) {
         <ShieldCheck aria-hidden="true" />
         <span><strong>Только проверяемые источники.</strong> Внешний поисковый API и автоматический сбор не подключены. Публичный рабочий email или телефон сами по себе не означают согласие на рекламную рассылку.</span>
       </div>
+
+      <LeadResearchPanel research={research} dailyTarget={dailyTarget} />
 
       <section className="metric-grid" aria-label="Показатели Lead Hunter">
         <article className="metric-card">

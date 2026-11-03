@@ -1,0 +1,101 @@
+import { date, integer, numeric, pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core"
+
+export const user = pgTable("user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: boolean("emailVerified").notNull().default(false),
+  image: text("image"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const session = pgTable("session", {
+  id: text("id").primaryKey(),
+  expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
+  token: text("token").notNull().unique(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+  ipAddress: text("ipAddress"),
+  userAgent: text("userAgent"),
+  userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
+})
+
+export const account = pgTable("account", {
+  id: text("id").primaryKey(),
+  accountId: text("accountId").notNull(),
+  providerId: text("providerId").notNull(),
+  userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
+  accessToken: text("accessToken"),
+  refreshToken: text("refreshToken"),
+  idToken: text("idToken"),
+  accessTokenExpiresAt: timestamp("accessTokenExpiresAt", { withTimezone: true }),
+  refreshTokenExpiresAt: timestamp("refreshTokenExpiresAt", { withTimezone: true }),
+  scope: text("scope"),
+  password: text("password"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const verification = pgTable("verification", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull(),
+  value: text("value").notNull(),
+  expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow(),
+})
+
+export const companies = pgTable("companies", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  name: text("name").notNull(),
+  domain: text("domain"),
+  industry: text("industry"),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const contacts = pgTable("contacts", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  firstName: text("firstName").notNull(),
+  lastName: text("lastName").notNull(),
+  email: text("email"),
+  phone: text("phone"),
+  title: text("title"),
+  companyId: text("companyId"),
+  status: text("status").notNull().default("lead"),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const deals = pgTable("deals", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  title: text("title").notNull(),
+  companyId: text("companyId"),
+  contactId: text("contactId"),
+  value: numeric("value", { precision: 12, scale: 2, mode: "number" }).notNull().default(0),
+  stage: text("stage").notNull().default("qualification"),
+  probability: integer("probability").notNull().default(10),
+  expectedCloseDate: date("expectedCloseDate", { mode: "string" }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const crmTasks = pgTable("crm_tasks", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  status: text("status").notNull().default("open"),
+  priority: text("priority").notNull().default("medium"),
+  dueDate: timestamp("dueDate", { withTimezone: true }),
+  contactId: text("contactId"),
+  dealId: text("dealId"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+})

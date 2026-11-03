@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     default: "DESIRE CRM — отношения, которые растут",
     template: "%s | DESIRE CRM",
   },
-  description: "DESIRE CRM для контактов, компаний, сделок, задач и ручной обработки Telegram-диалогов.",
+  description: "DESIRE CRM для контактов, компаний, ручного поиска лидов по первоисточникам, сделок, задач и Telegram-диалогов.",
   applicationName: "DESIRE CRM",
   appleWebApp: { capable: true, title: "DESIRE CRM", statusBarStyle: "default" },
 }

@@ -1,4 +1,5 @@
-import { date, integer, numeric, pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core"
+import { date, integer, numeric, pgTable, text, timestamp, boolean, uniqueIndex, check } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -101,6 +102,42 @@ export const crmTasks = pgTable("crm_tasks", {
   createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const leadProspects = pgTable("lead_prospects", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  companyName: text("companyName").notNull(),
+  website: text("website"),
+  websiteDomain: text("websiteDomain"),
+  industry: text("industry"),
+  region: text("region"),
+  publicEmail: text("publicEmail"),
+  publicPhone: text("publicPhone"),
+  publicTelegramUrl: text("publicTelegramUrl"),
+  sourceUrl: text("sourceUrl").notNull(),
+  sourceType: text("sourceType").notNull().default("company_site"),
+  status: text("status").notNull().default("new"),
+  potentialScore: integer("potentialScore").notNull().default(50),
+  notes: text("notes"),
+  discoveredAt: timestamp("discoveredAt", { withTimezone: true }).notNull().defaultNow(),
+  verifiedAt: timestamp("verifiedAt", { withTimezone: true }),
+  companyId: text("companyId"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("lead_prospects_user_domain_unique").on(table.userId, table.websiteDomain).where(sql`${table.websiteDomain} is not null`),
+  check("lead_prospects_potential_score_range", sql`${table.potentialScore} between 0 and 100`),
+])
+
+export const leadHunterSettings = pgTable("lead_hunter_settings", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull().unique(),
+  dailyTarget: integer("dailyTarget").notNull().default(20),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("lead_hunter_daily_target_range", sql`${table.dailyTarget} between 20 and 50`),
+])
 
 export const telegramSettings = pgTable("telegram_settings", {
   id: text("id").primaryKey(),

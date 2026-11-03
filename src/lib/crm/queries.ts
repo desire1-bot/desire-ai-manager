@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, ne, sum } from "drizzle-orm"
 import { headers } from "next/headers"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { companies, contacts, crmTasks, deals } from "@/lib/db/schema"
+import { companies, contacts, crmTasks, deals, leadHunterSettings, leadProspects } from "@/lib/db/schema"
 
 export async function getCurrentUser() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -108,6 +108,43 @@ export async function getTasks(userId: string) {
     .orderBy(asc(crmTasks.dueDate))
 
   return rows.map((task) => ({ ...task, dueDate: task.dueDate?.toISOString() ?? null }))
+}
+
+export async function getLeadHunterData(userId: string) {
+  const [rows, settings] = await Promise.all([
+    db.select({
+      id: leadProspects.id,
+      companyName: leadProspects.companyName,
+      website: leadProspects.website,
+      websiteDomain: leadProspects.websiteDomain,
+      industry: leadProspects.industry,
+      region: leadProspects.region,
+      publicEmail: leadProspects.publicEmail,
+      publicPhone: leadProspects.publicPhone,
+      publicTelegramUrl: leadProspects.publicTelegramUrl,
+      sourceUrl: leadProspects.sourceUrl,
+      sourceType: leadProspects.sourceType,
+      status: leadProspects.status,
+      potentialScore: leadProspects.potentialScore,
+      notes: leadProspects.notes,
+      discoveredAt: leadProspects.discoveredAt,
+      verifiedAt: leadProspects.verifiedAt,
+      companyId: leadProspects.companyId,
+    }).from(leadProspects).where(eq(leadProspects.userId, userId)).orderBy(desc(leadProspects.discoveredAt)),
+    db.select({ dailyTarget: leadHunterSettings.dailyTarget }).from(leadHunterSettings)
+      .where(eq(leadHunterSettings.userId, userId)).limit(1),
+  ])
+
+  return {
+    leads: rows.map((lead) => ({
+      ...lead,
+      sourceType: lead.sourceType as "company_site" | "licensed_directory",
+      status: lead.status as "new" | "verified" | "qualified" | "rejected" | "converted",
+      discoveredAt: lead.discoveredAt.toISOString(),
+      verifiedAt: lead.verifiedAt?.toISOString() ?? null,
+    })),
+    dailyTarget: settings[0]?.dailyTarget ?? 20,
+  }
 }
 
 export async function getReportData(userId: string) {

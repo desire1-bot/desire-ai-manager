@@ -6,9 +6,9 @@ import { FormEvent, useState } from "react"
 import { ArrowRight, Sparkles } from "lucide-react"
 import { authClient } from "@/lib/auth-client"
 
-type AuthFormProps = { mode: "sign-in" | "sign-up" }
+type AuthFormProps = { mode: "sign-in" | "sign-up"; returnTo: string }
 
-export function AuthForm({ mode }: AuthFormProps) {
+export function AuthForm({ mode, returnTo }: AuthFormProps) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
@@ -36,7 +36,7 @@ export function AuthForm({ mode }: AuthFormProps) {
       setError("Не удалось войти. Проверьте данные и попробуйте ещё раз.")
       return
     }
-    router.push("/dashboard")
+    router.push(returnTo)
     router.refresh()
   }
 
@@ -71,7 +71,9 @@ export function AuthForm({ mode }: AuthFormProps) {
           </form>
           <p className="auth-switch">
             {isSignUp ? "Уже есть аккаунт? " : "Впервые в DESIRE? "}
-            <Link href={isSignUp ? "/sign-in" : "/sign-up"}>{isSignUp ? "Войти" : "Создать аккаунт"}</Link>
+            <Link href={`${isSignUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`}>
+              {isSignUp ? "Войти" : "Создать аккаунт"}
+            </Link>
           </p>
           <p className="auth-legal">Продолжая, вы соглашаетесь с условиями использования и политикой конфиденциальности.</p>
         </div>

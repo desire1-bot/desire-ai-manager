@@ -21,18 +21,21 @@ import {
   X,
 } from "lucide-react"
 import { LeadResearchPanel } from "@/components/lead-research-panel"
-import type { LeadResearchOverview } from "@/lib/lead-research-types"
+import { leadHunterCategories, leadHunterCountries } from "@/lib/lead-hunter-options"
+import type { LeadCommunicationChannel, LeadCommunicationStatus, LeadPipelineStage, LeadResearchOverview } from "@/lib/lead-research-types"
 import {
   convertLeadToCompany,
   createLeadProspect,
   deleteLeadProspect,
   saveLeadHunterTarget,
+  updateLeadPipelineStage,
   updateLeadScore,
   updateLeadStatus,
 } from "@/app/actions/leads"
 
 type LeadStatus = "new" | "verified" | "qualified" | "rejected" | "converted"
 type SourceType = "company_site" | "licensed_directory"
+type Communication = { id: string; channel: LeadCommunicationChannel; status: LeadCommunicationStatus; body: string; createdAt: string }
 export type LeadProspect = {
   id: string
   companyName: string
@@ -43,8 +46,14 @@ export type LeadProspect = {
   publicEmail: string | null
   publicPhone: string | null
   publicTelegramUrl: string | null
+  publicInstagramUrl: string | null
   sourceUrl: string
   sourceType: SourceType
+  sourceProvider: "manual" | "brave_search"
+  searchCategory: string | null
+  searchCountry: string | null
+  pipelineStage: LeadPipelineStage
+  communications: Communication[]
   status: LeadStatus
   potentialScore: number
   notes: string | null
@@ -54,14 +63,18 @@ export type LeadProspect = {
 }
 
 type Props = { leads: LeadProspect[]; dailyTarget: number; research: LeadResearchOverview }
-type Filter = "all" | LeadStatus
+type Filter = "all" | LeadPipelineStage
 
-const statusLabels: Record<LeadStatus, string> = {
+const pipelineStageLabels: Record<LeadPipelineStage, string> = {
   new: "Новый",
-  verified: "Проверен",
-  qualified: "Квалифицирован",
-  rejected: "Отклонён",
-  converted: "В CRM",
+  analyzed: "Проанализирован",
+  priority: "Приоритетный",
+  proposal_prepared: "Предложение",
+  sent: "Отправлено вручную",
+  replied: "Ответ получен",
+  negotiating: "Переговоры",
+  partnered: "Сотрудничество",
+  refused: "Отказ",
 }
 const sourceLabels: Record<SourceType, string> = {
   company_site: "Сайт компании",
@@ -70,11 +83,16 @@ const sourceLabels: Record<SourceType, string> = {
 const filterOptions: { value: Filter; label: string }[] = [
   { value: "all", label: "Все" },
   { value: "new", label: "Новые" },
-  { value: "verified", label: "Проверены" },
-  { value: "qualified", label: "В работе" },
-  { value: "converted", label: "В CRM" },
-  { value: "rejected", label: "Отклонены" },
+  { value: "analyzed", label: "Проанализированы" },
+  { value: "priority", label: "Приоритетные" },
+  { value: "proposal_prepared", label: "Предложение" },
+  { value: "sent", label: "Отправлено" },
+  { value: "replied", label: "Ответ" },
+  { value: "negotiating", label: "Переговоры" },
+  { value: "partnered", label: "Сотрудничество" },
+  { value: "refused", label: "Отказ" },
 ]
+const pipelineStages = Object.keys(pipelineStageLabels) as LeadPipelineStage[]
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", year: "numeric" })
 
 function formatDate(value: string) {
@@ -86,6 +104,9 @@ export function LeadHunter({ leads, dailyTarget, research }: Props) {
   const [showForm, setShowForm] = useState(false)
   const [search, setSearch] = useState("")
   const [filter, setFilter] = useState<Filter>("all")
+  const [categoryFilter, setCategoryFilter] = useState("all")
+  const [countryFilter, setCountryFilter] = useState("all")
+  const [scoreFilter, setScoreFilter] = useState("all")
   const [target, setTarget] = useState(String(dailyTarget))
   const [pendingId, setPendingId] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -99,12 +120,17 @@ export function LeadHunter({ leads, dailyTarget, research }: Props) {
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("ru-RU")
     return leads.filter((lead) => {
-      const matchesStatus = filter === "all" || lead.status === filter
-      const matchesSearch = !query || [lead.companyName, lead.websiteDomain, lead.industry, lead.region, lead.publicEmail]
+      const matchesStatus = filter === "all" || lead.pipelineStage === filter
+      const categoryLabel = leadHunterCategories.find((category) => category.id === categoryFilter)?.label
+      const countryLabel = leadHunterCountries.find((country) => country.id === countryFilter)?.label
+      const matchesCategory = categoryFilter === "all" || lead.searchCategory === categoryFilter || lead.industry === categoryLabel
+      const matchesCountry = countryFilter === "all" || lead.searchCountry === countryFilter || lead.region === countryLabel
+      const matchesScore = scoreFilter === "all" || scoreFilter === "high" && lead.potentialScore >= 80 || scoreFilter === "medium" && lead.potentialScore >= 50 && lead.potentialScore < 80 || scoreFilter === "low" && lead.potentialScore < 50
+      const matchesSearch = !query || [lead.companyName, lead.websiteDomain, lead.industry, lead.region, lead.publicEmail, lead.publicPhone]
         .some((value) => value?.toLocaleLowerCase("ru-RU").includes(query))
-      return matchesStatus && matchesSearch
+      return matchesStatus && matchesCategory && matchesCountry && matchesScore && matchesSearch
     })
-  }, [filter, leads, search])
+  }, [categoryFilter, countryFilter, filter, leads, scoreFilter, search])
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -187,7 +213,7 @@ export function LeadHunter({ leads, dailyTarget, research }: Props) {
 
       <div className="lead-compliance" role="note">
         <ShieldCheck aria-hidden="true" />
-        <span><strong>Только проверяемые источники.</strong> Внешний поисковый API и автоматический сбор не подключены. Публичный рабочий email или телефон сами по себе не означают согласие на рекламную рассылку.</span>
+        <span><strong>Только проверяемые источники.</strong> Brave Search API подключён с разрешением на сохранение результатов. Telegram используется только как публичная ссылка: посты и контакты из каналов не загружаются. Публичный email сам по себе не означает согласие на рекламную рассылку.</span>
       </div>
 
       <LeadResearchPanel research={research} dailyTarget={dailyTarget} />
@@ -213,7 +239,7 @@ export function LeadHunter({ leads, dailyTarget, research }: Props) {
       </section>
 
       <section className="lead-controls" aria-label="Настройка дневной цели">
-        <div className="lead-target-copy"><Target aria-hidden="true" /><div><strong>Дневная цель поиска</strong><span>Ориентир для ручного поиска и проверки; автоматический сбор не запускается.</span></div></div>
+        <div className="lead-target-copy"><Target aria-hidden="true" /><div><strong>Дневная цель поиска</strong><span>Общий лимит ручного и ежедневного поиска за 24 часа.</span></div></div>
         <form className="lead-target-form" onSubmit={handleTargetSave}>
           <label htmlFor="lead-daily-target">Цель на день
             <select id="lead-daily-target" value={target} onChange={(event) => setTarget(event.target.value)}>
@@ -233,9 +259,12 @@ export function LeadHunter({ leads, dailyTarget, research }: Props) {
           <label>Сайт компании<input name="website" type="url" maxLength={2048} placeholder="https://company.ru" autoComplete="url" /></label>
           <label>Отрасль<input name="industry" maxLength={100} placeholder="Например, производство" /></label>
           <label>Регион<input name="region" maxLength={100} placeholder="Город или регион" autoComplete="address-level1" /></label>
+          <label>Категория поиска<select name="searchCategory" defaultValue=""><option value="">Не указана</option>{leadHunterCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select></label>
+          <label>Страна поиска<select name="searchCountry" defaultValue=""><option value="">Не указана</option>{leadHunterCountries.map((country) => <option key={country.id} value={country.id}>{country.label}</option>)}</select></label>
           <label>Публичный рабочий email<input name="publicEmail" type="email" maxLength={254} placeholder="info@company.ru" autoComplete="email" /></label>
           <label>Публичный рабочий телефон<input name="publicPhone" type="tel" maxLength={40} placeholder="+7 900 000-00-00" autoComplete="tel" /></label>
           <label>Официальный Telegram компании<input name="publicTelegramUrl" type="url" maxLength={2048} placeholder="https://t.me/company" /></label>
+          <label>Официальный Instagram компании<input name="publicInstagramUrl" type="url" maxLength={2048} placeholder="https://instagram.com/brand" /></label>
           <label>Тип первоисточника<select name="sourceType" defaultValue="company_site"><option value="company_site">Официальный сайт компании</option><option value="licensed_directory">Лицензированный каталог</option></select></label>
           <label>Потенциал рекламодателя, 0–100<input name="potentialScore" type="number" min="0" max="100" step="1" defaultValue="50" required /><span className="lead-note">Внутренняя оценка команды, не внешние данные.</span></label>
           <label className="lead-field-wide">URL страницы-первоисточника *<input name="sourceUrl" type="url" required maxLength={2048} placeholder="https://company.ru/contacts" /></label>
@@ -249,11 +278,16 @@ export function LeadHunter({ leads, dailyTarget, research }: Props) {
       <section className="lead-toolbar" aria-label="Поиск и фильтры лидов">
         <div className="lead-filter-list" role="group" aria-label="Фильтр по статусу">
           {filterOptions.map((option) => {
-            const count = option.value === "all" ? leads.length : leads.filter((lead) => lead.status === option.value).length
+            const count = option.value === "all" ? leads.length : leads.filter((lead) => lead.pipelineStage === option.value).length
             return <button key={option.value} type="button" className="lead-filter" aria-pressed={filter === option.value} onClick={() => setFilter(option.value)}>{option.label}<span className="lead-filter-count">{count}</span></button>
           })}
         </div>
         <label className="lead-search"><Search aria-hidden="true" /><span className="sr-only">Поиск по компаниям</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Компания, отрасль, email" /></label>
+        <div className="lead-filter-selects">
+          <label><span className="sr-only">Категория</span><select aria-label="Фильтр по категории" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">Все категории</option>{leadHunterCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)}</select></label>
+          <label><span className="sr-only">Страна</span><select aria-label="Фильтр по стране поиска" value={countryFilter} onChange={(event) => setCountryFilter(event.target.value)}><option value="all">Все страны</option>{leadHunterCountries.map((country) => <option key={country.id} value={country.id}>{country.label}</option>)}</select></label>
+          <label><span className="sr-only">Рейтинг</span><select aria-label="Фильтр по рейтингу" value={scoreFilter} onChange={(event) => setScoreFilter(event.target.value)}><option value="all">Все рейтинги</option><option value="high">80–100</option><option value="medium">50–79</option><option value="low">0–49</option></select></label>
+        </div>
       </section>
 
       {filtered.length ? <div className="lead-cards" role="list" aria-label="Карточки лидов">
@@ -296,7 +330,7 @@ function LeadCard({ lead, pending, onAction, onDelete }: {
     <article className="lead-card" role="listitem">
       <div className="lead-card-top">
         <div className="lead-company"><h2>{lead.companyName}</h2><p>{[lead.industry, lead.region].filter(Boolean).join(" · ") || lead.websiteDomain || "Компания без категории"}</p></div>
-        <span className="lead-status" data-status={lead.status}>{statusLabels[lead.status]}</span>
+        <span className="lead-status" data-status={lead.pipelineStage}>{pipelineStageLabels[lead.pipelineStage]}</span>
       </div>
       <div className="lead-card-grid">
         {lead.website && <div className="lead-detail"><Globe aria-hidden="true" /><a href={lead.website} target="_blank" rel="noopener noreferrer">{lead.websiteDomain ?? lead.website}</a></div>}
@@ -304,9 +338,14 @@ function LeadCard({ lead, pending, onAction, onDelete }: {
         {lead.publicPhone && <div className="lead-detail"><Phone aria-hidden="true" /><a href={`tel:${lead.publicPhone}`}>{lead.publicPhone}</a></div>}
         {lead.region && <div className="lead-detail"><MapPin aria-hidden="true" /><span>{lead.region}</span></div>}
         {lead.publicTelegramUrl && <div className="lead-detail"><ArrowUpRight aria-hidden="true" /><a href={lead.publicTelegramUrl} target="_blank" rel="noopener noreferrer">Telegram компании</a></div>}
+        {lead.publicInstagramUrl && <div className="lead-detail"><ArrowUpRight aria-hidden="true" /><a href={lead.publicInstagramUrl} target="_blank" rel="noopener noreferrer">Instagram компании</a></div>}
       </div>
       {lead.notes && <p className="lead-note">{lead.notes}</p>}
-      <div className="lead-card-meta"><a className="lead-source-link" href={lead.sourceUrl} target="_blank" rel="noopener noreferrer">Первоисточник <ExternalLink aria-hidden="true" /></a><span className="lead-note">{sourceLabels[lead.sourceType]}</span><time className="lead-date" dateTime={lead.discoveredAt}>Обнаружена {formatDate(lead.discoveredAt)}</time></div>
+      <div className="lead-card-meta"><a className="lead-source-link" href={lead.sourceUrl} target="_blank" rel="noopener noreferrer">Первоисточник <ExternalLink aria-hidden="true" /></a><span className="lead-note">{sourceLabels[lead.sourceType]} · {lead.sourceProvider === "brave_search" ? "Brave Search" : "Ручной ввод"}</span><time className="lead-date" dateTime={lead.discoveredAt}>Обнаружена {formatDate(lead.discoveredAt)}</time></div>
+      <label className="lead-stage-editor" htmlFor={`stage-${lead.id}`}><span>Этап работы</span><select id={`stage-${lead.id}`} value={lead.pipelineStage} disabled={pending} onChange={(event) => {
+        const nextStage = event.currentTarget.value as LeadPipelineStage
+        onAction(lead.id, () => updateLeadPipelineStage(lead.id, nextStage), `Этап обновлён: ${pipelineStageLabels[nextStage]}.`)
+      }}>{pipelineStages.map((stage) => <option key={stage} value={stage}>{pipelineStageLabels[stage]}</option>)}</select></label>
       <div className="lead-score-row"><span className="lead-score-label">Потенциал рекламодателя</span><div className="lead-score-value"><Target aria-hidden="true" /><span>{lead.potentialScore}/100</span><form className="lead-score-editor" onSubmit={saveScore}><label className="sr-only" htmlFor={`score-${lead.id}`}>Изменить оценку для {lead.companyName}</label><input id={`score-${lead.id}`} value={score} onChange={(event) => setScore(event.target.value)} type="number" min="0" max="100" /><button type="submit" disabled={scorePending}>Ок</button></form></div></div>
       {scoreMessage && <p className="lead-note" role="status">{scoreMessage}</p>}
       <div className="lead-card-actions">

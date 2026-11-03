@@ -2,9 +2,16 @@ import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { AuthForm } from "@/components/auth-form"
 import { auth } from "@/lib/auth"
+import { getSafeReturnTo } from "@/lib/auth-return-path"
 
-export default async function SignInPage() {
-  const session = await auth.api.getSession({ headers: await headers() })
-  if (session?.user) redirect("/")
-  return <AuthForm mode="sign-in" />
+type SignInPageProps = {
+  searchParams: Promise<{ returnTo?: string | string[] }>
+}
+
+export default async function SignInPage({ searchParams }: SignInPageProps) {
+  const [{ returnTo: requestedReturnTo }, requestHeaders] = await Promise.all([searchParams, headers()])
+  const returnTo = getSafeReturnTo(requestedReturnTo)
+  const session = await auth.api.getSession({ headers: requestHeaders })
+  if (session?.user) redirect(returnTo)
+  return <AuthForm mode="sign-in" returnTo={returnTo} />
 }

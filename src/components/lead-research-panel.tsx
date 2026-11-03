@@ -9,7 +9,10 @@ import {
   Clock3,
   FileText,
   Globe2,
+  History,
   LoaderCircle,
+  MapPin,
+  Search,
   ShieldCheck,
   Sparkles,
   Upload,
@@ -20,7 +23,10 @@ import {
   rejectLeadResearchCandidate,
   saveLeadResearchCandidate,
   saveLeadResearchDraft,
+  startLeadHunterSearch,
 } from "@/app/actions/lead-research"
+import { saveLeadHunterPreferences } from "@/app/actions/leads"
+import { leadHunterCategories, leadHunterCountries } from "@/lib/lead-hunter-options"
 import type {
   LeadResearchCandidateView,
   LeadResearchOverview,
@@ -58,8 +64,50 @@ export function LeadResearchPanel({ research, dailyTarget }: { research: LeadRes
   const [sourceType, setSourceType] = useState<LeadResearchSourceType>("company_site")
   const [confirmed, setConfirmed] = useState(false)
   const [pending, setPending] = useState(false)
+  const [searchPending, setSearchPending] = useState(false)
+  const [searchCountries, setSearchCountries] = useState([...research.settings.searchCountries])
+  const [searchCategories, setSearchCategories] = useState([...research.settings.searchCategories])
+  const [dailySearchEnabled, setDailySearchEnabled] = useState(research.settings.dailySearchEnabled)
+  const [searchLimit, setSearchLimit] = useState(String(dailyTarget))
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null)
   const remaining = Math.max(0, dailyTarget - research.usageLast24Hours)
+
+  async function handlePreferencesSave(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPending(true)
+    setNotice(null)
+    try {
+      const result = await saveLeadHunterPreferences({ dailySearchEnabled, searchCountries, searchCategories })
+      if (!result.ok) {
+        setNotice({ text: result.error, error: true })
+        return
+      }
+      setNotice({ text: dailySearchEnabled ? "Настройки сохранены. Автопоиск запустится завтра в 09:00 по Москве." : "Настройки сохранены. Ежедневный автопоиск выключен." })
+      router.refresh()
+    } catch {
+      setNotice({ text: "Не удалось сохранить настройки поиска.", error: true })
+    } finally {
+      setPending(false)
+    }
+  }
+
+  async function handleSearchNow() {
+    setSearchPending(true)
+    setNotice(null)
+    try {
+      const result = await startLeadHunterSearch({ categories: searchCategories, countries: searchCountries, limit: Number(searchLimit) })
+      if (!result.ok) {
+        setNotice({ text: result.error ?? "Не удалось запустить поиск.", error: true })
+        return
+      }
+      setNotice({ text: result.message ?? `Найдено новых записей: ${result.discoveredCount}.` })
+      router.refresh()
+    } catch {
+      setNotice({ text: "Не удалось запустить поиск. Проверьте подключение и повторите попытку.", error: true })
+    } finally {
+      setSearchPending(false)
+    }
+  }
 
   async function handleImport(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -108,9 +156,9 @@ export function LeadResearchPanel({ research, dailyTarget }: { research: LeadRes
     <section className="research-panel" aria-labelledby="research-title">
       <div className="research-header">
         <div>
-          <span className="eyebrow">РУЧНОЙ ПОИСК · ПРОВЕРЯЕМЫЕ ИСТОЧНИКИ</span>
+          <span className="eyebrow">BRAVE SEARCH · ОФИЦИАЛЬНЫЕ САЙТЫ · ССЫЛКИ НА КАНАЛЫ</span>
           <h2 id="research-title"><Sparkles aria-hidden="true" />AI-проверка рекламодателей</h2>
-          <p>Добавьте официальные сайты компаний или материалы из источника, на использование которого у вас есть разрешение. Поиск, обход ограничений и автоматический сбор отключены.</p>
+          <p>Поиск по категориям и странам через Brave Search API. AI анализирует только проверенные страницы сайтов компаний; из Telegram сохраняется ссылка на публичный канал без загрузки постов и контактов.</p>
         </div>
         <div className="research-limit"><Clock3 aria-hidden="true" /><span>За последние 24 часа<br /><strong>{research.usageLast24Hours} / {dailyTarget}</strong> компаний</span></div>
       </div>
@@ -121,6 +169,65 @@ export function LeadResearchPanel({ research, dailyTarget }: { research: LeadRes
         <ResearchStat icon={<ShieldCheck aria-hidden="true" />} label="Оценка 80+" value={research.stats.promising} />
         <ResearchStat icon={<FileText aria-hidden="true" />} label="Черновики" value={research.stats.proposals} />
       </div>
+
+      {research.stats.recentPriority > 0 && <aside className="research-priority-alert" role="status">
+        <BadgeCheck aria-hidden="true" /><span><strong>Новые приоритетные рекламодатели</strong>{research.stats.recentPriority} проверенных компаний получили оценку 80+ за последние 24 часа.</span>
+      </aside>}
+
+      <form className="research-config" onSubmit={handlePreferencesSave}>
+        <div className="research-config-header">
+          <div><h3><Search aria-hidden="true" />Поиск по категориям и странам</h3><p>Реальные результаты Brave Search API; до 10 поисковых запросов за запуск.</p></div>
+          <label className="research-schedule-toggle">
+            <input type="checkbox" checked={dailySearchEnabled} onChange={(event) => setDailySearchEnabled(event.target.checked)} />
+            <span><strong>Ежедневно</strong><small>09:00 · Москва</small></span>
+          </label>
+        </div>
+        <div className="research-option-groups">
+          <fieldset className="research-option-group">
+            <legend><MapPin aria-hidden="true" />География поиска</legend>
+            <div className="research-option-list research-country-list">
+              {leadHunterCountries.map((country) => <label key={country.id} className="research-option">
+                <input type="checkbox" checked={searchCountries.includes(country.id)} onChange={(event) => setSearchCountries((current) => event.target.checked ? [...current, country.id] : current.filter((value) => value !== country.id))} />
+                <span>{country.label}</span>
+              </label>)}
+            </div>
+          </fieldset>
+          <fieldset className="research-option-group">
+            <legend><Globe2 aria-hidden="true" />Категории рекламодателей</legend>
+            <div className="research-option-list">
+              {leadHunterCategories.map((category) => <label key={category.id} className="research-option">
+                <input type="checkbox" checked={searchCategories.includes(category.id)} onChange={(event) => setSearchCategories((current) => event.target.checked ? [...current, category.id] : current.filter((value) => value !== category.id))} />
+                <span>{category.label}</span>
+              </label>)}
+            </div>
+          </fieldset>
+        </div>
+        <div className="research-config-actions">
+          <label className="research-limit-select">Компаний за запуск
+            <select value={searchLimit} onChange={(event) => setSearchLimit(event.target.value)}>
+              {[20, 25, 30, 35, 40, 45, 50].filter((value) => value <= dailyTarget).map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+          <div className="research-config-buttons">
+            <button type="submit" className="secondary-button" disabled={pending}>{pending ? "Сохраняем…" : "Сохранить настройки"}</button>
+            <button type="button" className="primary-button" disabled={searchPending || remaining === 0 || !searchCountries.length || !searchCategories.length} onClick={handleSearchNow}>
+              {searchPending ? <LoaderCircle className="research-spinner" aria-hidden="true" /> : <Search aria-hidden="true" />}
+              {searchPending ? "Ищем компании…" : "Начать поиск"}
+            </button>
+          </div>
+        </div>
+        <p className="research-footnote">Автопоиск выключен, пока вы явно его не включите. Он добавляет компании в сохраняемую очередь и обрабатывает не более дневного лимита. Email/телефоны извлекаются только с официальных сайтов. Для Telegram сохраняется только публичная ссылка.</p>
+      </form>
+
+      <details className="research-history">
+        <summary><History aria-hidden="true" />История поиска <span>{research.searchRuns.length}</span></summary>
+        {research.searchRuns.length ? <ul>{research.searchRuns.map((run) => <li key={run.id}>
+          <div><strong>{leadHunterCategories.find((item) => item.id === run.searchCategory)?.label ?? run.searchCategory} · {leadHunterCountries.find((item) => item.id === run.searchCountry)?.label ?? run.searchCountry}</strong><span>{run.trigger === "scheduled" ? "Расписание" : "Вручную"} · {dateFormat.format(new Date(run.startedAt))}</span></div>
+          <span className="research-history-count" data-status={run.status}>{run.status === "failed" ? "Ошибка" : run.status === "running" ? "Выполняется" : `Найдено ${run.discoveredCount}`}</span>
+          {run.telegramLinkCount > 0 && <small>Ссылок Telegram: {run.telegramLinkCount}</small>}
+          {run.errorMessage && <small className="research-error-text">{run.errorMessage}</small>}
+        </li>)}</ul> : <p>Поиск ещё не запускался.</p>}
+      </details>
 
       <form className="research-form" onSubmit={handleImport}>
         <div className="research-form-header">
@@ -177,6 +284,8 @@ function ResearchStat({ icon, label, value }: { icon: React.ReactNode; label: st
 function ResearchCandidateCard({ candidate }: { candidate: LeadResearchCandidateView }) {
   const router = useRouter()
   const [proposal, setProposal] = useState(candidate.proposalDraft ?? "")
+  const [emailDraft, setEmailDraft] = useState(candidate.emailDraft ?? "")
+  const [telegramDraft, setTelegramDraft] = useState(candidate.telegramDraft ?? "")
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null)
 
@@ -205,7 +314,7 @@ function ResearchCandidateCard({ candidate }: { candidate: LeadResearchCandidate
     <article className="research-card">
       <div className="research-card-header">
         <div className="research-card-title">
-          <span className="research-source-type">{sourceLabels[candidate.sourceType]}</span>
+          <span className="research-source-type">{candidate.sourceProvider === "brave_search" ? `Brave Search · ${leadHunterCountries.find((item) => item.id === candidate.searchCountry)?.label ?? "региональный поиск"}` : sourceLabels[candidate.sourceType]}</span>
           <h4>{displayName}</h4>
           <a href={candidate.sourceUrl} target="_blank" rel="noopener noreferrer">{candidate.websiteDomain}<ArrowUpRight aria-hidden="true" /></a>
         </div>
@@ -214,7 +323,14 @@ function ResearchCandidateCard({ candidate }: { candidate: LeadResearchCandidate
         </span>
       </div>
 
-      {candidate.status === "pending" && <p className="research-state"><Clock3 aria-hidden="true" />Ожидает запуска. Анализ выполняется только вручную.</p>}
+      {candidate.searchQuery && <p className="research-discovery-note"><Search aria-hidden="true" />Запрос: {candidate.searchQuery}</p>}
+      {candidate.searchResultDescription && <p className="research-result-description">{candidate.searchResultDescription}</p>}
+      {(candidate.publicEmail || candidate.publicPhone || candidate.instagramUrl) && <div className="research-public-contacts">
+        {candidate.publicEmail && <a href={`mailto:${candidate.publicEmail}`}>{candidate.publicEmail}</a>}
+        {candidate.publicPhone && <a href={`tel:${candidate.publicPhone}`}>{candidate.publicPhone}</a>}
+        {candidate.instagramUrl && <a href={candidate.instagramUrl} target="_blank" rel="noopener noreferrer">Instagram <ArrowUpRight aria-hidden="true" /></a>}
+      </div>}
+      {candidate.status === "pending" && <p className="research-state"><Clock3 aria-hidden="true" />Ожидает запуска. Анализ выполняется автоматически по расписанию; вручную можно запустить отдельно.</p>}
       {candidate.status === "analyzing" && <p className="research-state"><LoaderCircle className="research-spinner" aria-hidden="true" />{candidate.sourceCheckStatus === "passed" ? "Анализируем сохранённый снимок сайта…" : "Проверяем доступ к источнику и анализируем страницу…"}</p>}
       {candidate.status === "failed" && <p className="research-error"><AlertCircle aria-hidden="true" />{candidate.errorMessage ?? "Анализ не завершился."}</p>}
       {candidate.status === "failed" && candidate.retryable && candidate.sourceCheckStatus === "passed" && <p className="research-cache-note" role="status">Источник уже проверен. Повтор использует сохранённый снимок и не запрашивает сайт заново.</p>}
@@ -231,8 +347,12 @@ function ResearchCandidateCard({ candidate }: { candidate: LeadResearchCandidate
       {isAnalyzed && <>
         <div className="research-analysis-top">
           <div className="research-score"><strong>{candidate.fitScore ?? 0}</strong><span>/ 100</span></div>
-          <div className="research-analysis-copy"><span>{[candidate.industry, candidate.region].filter(Boolean).join(" · ") || "Отрасль или регион не подтверждены источником"}</span><p>{candidate.summary}</p></div>
+          <div className="research-analysis-copy"><span>{[candidate.industry, candidate.region, candidate.geographicCoverage].filter(Boolean).join(" · ") || "Отрасль или география не подтверждены источником"}</span><p>{candidate.summary}</p></div>
         </div>
+        <div className="research-sponsor-metrics" aria-label="Эвристические оценки спонсорского потенциала">
+          {[{ label: "Спонсорство", value: candidate.sponsorshipPotential }, { label: "Бартер", value: candidate.barterPotential }, { label: "Денежный формат", value: candidate.cashPotential }, { label: "Интерес к рекламе", value: candidate.advertisingFit }].map((metric) => <div key={metric.label}><span>{metric.label}</span><strong>{metric.value ?? "—"}<small>{metric.value == null ? "" : "/100"}</small></strong></div>)}
+        </div>
+        <p className="research-score-caveat">Оценки — ориентировочные сигналы на основе сайта компании, а не подтверждённые бюджет, намерение или вероятность сделки.</p>
         {candidate.fitRationale && <p className="research-rationale"><strong>Почему может подойти</strong>{candidate.fitRationale}</p>}
         {candidate.evidence.length > 0 && <details className="research-evidence">
           <summary>Проверяемые основания · {candidate.evidence.length}</summary>
@@ -240,16 +360,25 @@ function ResearchCandidateCard({ candidate }: { candidate: LeadResearchCandidate
         </details>}
         {candidate.sourceRetrievedAt && <p className="research-retrieved">Источник проверен {dateFormat.format(new Date(candidate.sourceRetrievedAt))}</p>}
         <label className="research-proposal-label" htmlFor={`proposal-${candidate.id}`}>Черновик предложения · проверьте и отредактируйте
-          <textarea id={`proposal-${candidate.id}`} value={proposal} onChange={(event) => setProposal(event.target.value)} maxLength={3000} rows={5} disabled={candidate.status === "saved"} />
+          <textarea id={`proposal-${candidate.id}`} value={proposal} onChange={(event) => setProposal(event.target.value)} maxLength={3000} rows={4} disabled={candidate.status === "saved"} />
         </label>
+        <details className="research-outreach-drafts">
+          <summary>Персональные сообщения · email и Telegram</summary>
+          <label className="research-proposal-label" htmlFor={`email-draft-${candidate.id}`}>Черновик email · отправка только вручную после вашего подтверждения
+            <textarea id={`email-draft-${candidate.id}`} value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} maxLength={3000} rows={4} disabled={candidate.status === "saved"} />
+          </label>
+          <label className="research-proposal-label" htmlFor={`telegram-draft-${candidate.id}`}>Черновик Telegram · отправка только вручную после вашего подтверждения
+            <textarea id={`telegram-draft-${candidate.id}`} value={telegramDraft} onChange={(event) => setTelegramDraft(event.target.value)} maxLength={3000} rows={4} disabled={candidate.status === "saved"} />
+          </label>
+        </details>
       </>}
 
       {notice && <p className="research-card-notice" data-tone={notice.error ? "error" : "success"} role={notice.error ? "alert" : "status"}>{notice.text}</p>}
       <div className="research-card-actions">
         {(candidate.status === "pending" || candidate.status === "failed" && candidate.retryable) && <button type="button" className="primary-button" disabled={busy} onClick={() => runAction(() => analyzeLeadResearchCandidate(candidate.id), "AI-анализ завершён. Проверьте вывод и источники.")}>{busy ? <LoaderCircle className="research-spinner" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}{candidate.status === "failed" ? "Повторить анализ" : "Анализировать сайт"}</button>}
         {candidate.status === "analyzed" && <>
-          <button type="button" className="secondary-button" disabled={busy || !proposal.trim()} onClick={() => runAction(() => saveLeadResearchDraft(candidate.id, proposal), "Черновик предложения сохранён.")}>{busy ? "Сохраняем…" : "Сохранить черновик"}</button>
-          <button type="button" className="primary-button" disabled={busy || !proposal.trim()} onClick={() => runAction(() => saveLeadResearchCandidate(candidate.id, proposal), "Лид добавлен в Lead Hunter; перед квалификацией проверьте сайт вручную.")}>{busy ? "Сохраняем…" : "Сохранить как лид"}</button>
+          <button type="button" className="secondary-button" disabled={busy || !proposal.trim()} onClick={() => runAction(() => saveLeadResearchDraft(candidate.id, { proposalDraft: proposal, emailDraft, telegramDraft }), "Черновик предложения сохранён.")}>{busy ? "Сохраняем…" : "Сохранить черновик"}</button>
+          <button type="button" className="primary-button" disabled={busy || !proposal.trim()} onClick={() => runAction(() => saveLeadResearchCandidate(candidate.id, { proposalDraft: proposal, emailDraft, telegramDraft }), "Лид добавлен в Lead Hunter; перед квалификацией проверьте сайт вручную.")}>{busy ? "Сохраняем…" : "Сохранить как лид"}</button>
         </>}
         {candidate.status === "saved" && <span className="research-saved"><BadgeCheck aria-hidden="true" />Лид ожидает ручной проверки в Lead Hunter</span>}
         {candidate.status === "rejected" && <span className="research-saved">Карточка закрыта</span>}

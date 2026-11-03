@@ -115,8 +115,13 @@ export const leadProspects = pgTable("lead_prospects", {
   publicEmail: text("publicEmail"),
   publicPhone: text("publicPhone"),
   publicTelegramUrl: text("publicTelegramUrl"),
+  publicInstagramUrl: text("publicInstagramUrl"),
   sourceUrl: text("sourceUrl").notNull(),
   sourceType: text("sourceType").notNull().default("company_site"),
+  sourceProvider: text("sourceProvider").notNull().default("manual"),
+  searchCategory: text("searchCategory"),
+  searchCountry: text("searchCountry"),
+  pipelineStage: text("pipelineStage").notNull().default("new"),
   status: text("status").notNull().default("new"),
   potentialScore: integer("potentialScore").notNull().default(50),
   notes: text("notes"),
@@ -127,13 +132,20 @@ export const leadProspects = pgTable("lead_prospects", {
   updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("lead_prospects_user_domain_unique").on(table.userId, table.websiteDomain).where(sql`${table.websiteDomain} is not null`),
+  index("lead_prospects_user_telegram_url_idx").on(table.userId, table.publicTelegramUrl),
+  index("lead_prospects_user_instagram_url_idx").on(table.userId, table.publicInstagramUrl),
   check("lead_prospects_potential_score_range", sql`${table.potentialScore} between 0 and 100`),
+  check("lead_prospects_pipeline_stage_check", sql`${table.pipelineStage} in ('new', 'analyzed', 'priority', 'proposal_prepared', 'sent', 'replied', 'negotiating', 'partnered', 'refused')`),
 ])
 
 export const leadHunterSettings = pgTable("lead_hunter_settings", {
   id: text("id").primaryKey(),
   userId: text("userId").notNull().unique(),
   dailyTarget: integer("dailyTarget").notNull().default(20),
+  dailySearchEnabled: boolean("dailySearchEnabled").notNull().default(false),
+  searchCountries: jsonb("searchCountries").$type<string[]>().notNull().default(["RU"]),
+  searchCategories: jsonb("searchCategories").$type<string[]>().notNull().default(["lingerie", "intimate", "cosmetics", "lifestyle", "gifts", "events"]),
+  lastAutomatedSearchDate: text("lastAutomatedSearchDate"),
   createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
@@ -153,6 +165,29 @@ export const leadResearchRuns = pgTable("lead_research_runs", {
   check("lead_research_runs_status_check", sql`${table.status} in ('open', 'completed')`),
 ])
 
+export const leadHunterSearchRuns = pgTable("lead_hunter_search_runs", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  trigger: text("trigger").notNull(),
+  searchCountry: text("searchCountry").notNull(),
+  searchCategory: text("searchCategory").notNull(),
+  query: text("query").notNull(),
+  status: text("status").notNull().default("running"),
+  requestedCount: integer("requestedCount").notNull().default(0),
+  discoveredCount: integer("discoveredCount").notNull().default(0),
+  duplicateCount: integer("duplicateCount").notNull().default(0),
+  telegramLinkCount: integer("telegramLinkCount").notNull().default(0),
+  errorMessage: text("errorMessage"),
+  startedAt: timestamp("startedAt", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finishedAt", { withTimezone: true }),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("lead_hunter_search_runs_user_created_idx").on(table.userId, table.createdAt),
+  check("lead_hunter_search_runs_trigger_check", sql`${table.trigger} in ('manual', 'scheduled')`),
+  check("lead_hunter_search_runs_status_check", sql`${table.status} in ('running', 'completed', 'failed')`),
+  check("lead_hunter_search_runs_counts_check", sql`${table.requestedCount} between 0 and 50 and ${table.discoveredCount} between 0 and 50 and ${table.duplicateCount} >= 0 and ${table.telegramLinkCount} between 0 and 50`),
+])
+
 export const leadResearchCandidates = pgTable("lead_research_candidates", {
   id: text("id").primaryKey(),
   userId: text("userId").notNull(),
@@ -162,6 +197,16 @@ export const leadResearchCandidates = pgTable("lead_research_candidates", {
   websiteDomain: text("websiteDomain").notNull(),
   sourceTitle: text("sourceTitle"),
   sourceType: text("sourceType").notNull().default("company_site"),
+  sourceProvider: text("sourceProvider").notNull().default("manual"),
+  searchRunId: text("searchRunId"),
+  searchCountry: text("searchCountry"),
+  searchCategory: text("searchCategory"),
+  searchQuery: text("searchQuery"),
+  searchResultTitle: text("searchResultTitle"),
+  searchResultDescription: text("searchResultDescription"),
+  publicEmail: text("publicEmail"),
+  publicPhone: text("publicPhone"),
+  instagramUrl: text("instagramUrl"),
   sourceRetrievedAt: timestamp("sourceRetrievedAt", { withTimezone: true }),
   sourceSnapshot: text("sourceSnapshot"),
   sourceFinalUrl: text("sourceFinalUrl"),
@@ -173,9 +218,16 @@ export const leadResearchCandidates = pgTable("lead_research_candidates", {
   industry: text("industry"),
   region: text("region"),
   fitScore: integer("fitScore"),
+  sponsorshipPotential: integer("sponsorshipPotential"),
+  barterPotential: integer("barterPotential"),
+  cashPotential: integer("cashPotential"),
+  advertisingFit: integer("advertisingFit"),
+  geographicCoverage: text("geographicCoverage"),
   fitRationale: text("fitRationale"),
   evidence: jsonb("evidence").$type<LeadResearchEvidence[]>().notNull().default([]),
   proposalDraft: text("proposalDraft"),
+  emailDraft: text("emailDraft"),
+  telegramDraft: text("telegramDraft"),
   status: text("status").notNull().default("pending"),
   errorMessage: text("errorMessage"),
   modelId: text("modelId"),
@@ -190,8 +242,25 @@ export const leadResearchCandidates = pgTable("lead_research_candidates", {
   check("lead_research_candidates_status_check", sql`${table.status} in ('pending', 'analyzing', 'analyzed', 'saved', 'rejected', 'failed')`),
   check("lead_research_candidates_source_check_status", sql`${table.sourceCheckStatus} in ('unchecked', 'passed', 'blocked', 'temporary_error')`),
   check("lead_research_candidates_retry_count", sql`${table.retryCount} >= 0`),
+  index("lead_research_candidates_search_run_idx").on(table.userId, table.searchRunId),
   check("lead_research_candidates_score_range", sql`${table.fitScore} is null or ${table.fitScore} between 0 and 100`),
+  check("lead_research_candidates_sponsor_score_range", sql`(${table.sponsorshipPotential} is null or ${table.sponsorshipPotential} between 0 and 100) and (${table.barterPotential} is null or ${table.barterPotential} between 0 and 100) and (${table.cashPotential} is null or ${table.cashPotential} between 0 and 100) and (${table.advertisingFit} is null or ${table.advertisingFit} between 0 and 100)`),
   check("lead_research_candidates_source_type_check", sql`${table.sourceType} in ('company_site', 'licensed_directory')`),
+])
+
+export const leadProspectCommunications = pgTable("lead_prospect_communications", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  leadProspectId: text("leadProspectId").notNull(),
+  channel: text("channel").notNull(),
+  status: text("status").notNull().default("draft"),
+  body: text("body").notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("lead_prospect_communications_user_prospect_created_idx").on(table.userId, table.leadProspectId, table.createdAt),
+  check("lead_prospect_communications_channel_check", sql`${table.channel} in ('email', 'telegram')`),
+  check("lead_prospect_communications_status_check", sql`${table.status} in ('draft', 'sent', 'received')`),
 ])
 
 export const telegramSettings = pgTable("telegram_settings", {

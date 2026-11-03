@@ -68,6 +68,8 @@ export const contacts = pgTable("contacts", {
   companyId: text("companyId"),
   status: text("status").notNull().default("lead"),
   notes: text("notes"),
+  telegramUserId: text("telegramUserId"),
+  telegramUsername: text("telegramUsername"),
   createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
 })
@@ -96,6 +98,51 @@ export const crmTasks = pgTable("crm_tasks", {
   dueDate: timestamp("dueDate", { withTimezone: true }),
   contactId: text("contactId"),
   dealId: text("dealId"),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const telegramSettings = pgTable("telegram_settings", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull().unique(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const telegramConversations = pgTable("telegram_conversations", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  contactId: text("contactId").notNull(),
+  telegramUserId: text("telegramUserId").notNull(),
+  username: text("username"),
+  firstName: text("firstName").notNull(),
+  lastName: text("lastName"),
+  lastMessageAt: timestamp("lastMessageAt", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const telegramMessages = pgTable("telegram_messages", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  conversationId: text("conversationId").notNull(),
+  telegramMessageId: text("telegramMessageId"),
+  telegramUpdateId: text("telegramUpdateId"),
+  direction: text("direction").notNull(),
+  text: text("text").notNull(),
+  sentAt: timestamp("sentAt", { withTimezone: true }).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const telegramReplyDrafts = pgTable("telegram_reply_drafts", {
+  id: text("id").primaryKey(),
+  userId: text("userId").notNull(),
+  conversationId: text("conversationId").notNull(),
+  inboundMessageId: text("inboundMessageId").notNull().unique(),
+  body: text("body").notNull(),
+  status: text("status").notNull().default("pending"),
+  reviewedBy: text("reviewedBy"),
+  reviewedAt: timestamp("reviewedAt", { withTimezone: true }),
+  sentAt: timestamp("sentAt", { withTimezone: true }),
   createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
 })

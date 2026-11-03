@@ -9,8 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.108",
     "@base-ui/react": "^1.9.0",
+    "@shadcn/react": "^0.3.1",
     "@types/pg": "^8.23.1",
+    "ai": "^7.0.162",
     "better-auth": "^1.7.15",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.2",

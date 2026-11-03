@@ -13,6 +13,7 @@ import {
   MoreHorizontal,
   Plus,
   Settings,
+  Send,
   Sparkles,
   Users,
 } from "lucide-react"
@@ -30,6 +31,7 @@ const primaryNav = [
   { href: "/deals", label: "Сделки", icon: Briefcase },
   { href: "/tasks", label: "Задачи", icon: CheckSquare },
   { href: "/reports", label: "Отчёты", icon: BarChart3 },
+  { href: "/telegram", label: "Telegram", icon: Send },
   { href: "/settings", label: "Настройки", icon: Settings },
 ]
 
@@ -62,8 +64,8 @@ export function AppShell({ children, user }: AppShellProps) {
     router.refresh()
   }
 
-  const mobileNav = [primaryNav[0], primaryNav[1], primaryNav[3], primaryNav[4]]
-  const moreNav = [primaryNav[2], primaryNav[5], primaryNav[6]]
+  const mobileNav = [primaryNav[0], primaryNav[1], primaryNav[6], primaryNav[4]]
+  const moreNav = [primaryNav[2], primaryNav[3], primaryNav[5], primaryNav[7]]
 
   return (
     <div className="crm-layout">

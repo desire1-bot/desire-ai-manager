@@ -13,7 +13,9 @@ import {
   MoreHorizontal,
   Plus,
   Settings,
+  Send,
   Sparkles,
+  Target,
   Users,
 } from "lucide-react"
 import { authClient } from "@/lib/auth-client"
@@ -27,9 +29,11 @@ const primaryNav = [
   { href: "/dashboard", label: "Обзор", icon: LayoutDashboard },
   { href: "/contacts", label: "Контакты", icon: Users },
   { href: "/companies", label: "Компании", icon: Building2 },
+  { href: "/leads", label: "Поиск лидов", icon: Target },
   { href: "/deals", label: "Сделки", icon: Briefcase },
   { href: "/tasks", label: "Задачи", icon: CheckSquare },
   { href: "/reports", label: "Отчёты", icon: BarChart3 },
+  { href: "/telegram", label: "Telegram", icon: Send },
   { href: "/settings", label: "Настройки", icon: Settings },
 ]
 
@@ -62,8 +66,8 @@ export function AppShell({ children, user }: AppShellProps) {
     router.refresh()
   }
 
-  const mobileNav = [primaryNav[0], primaryNav[1], primaryNav[3], primaryNav[4]]
-  const moreNav = [primaryNav[2], primaryNav[5], primaryNav[6]]
+  const mobileNav = [primaryNav[0], primaryNav[1], primaryNav[3], primaryNav[5]]
+  const moreNav = [primaryNav[2], primaryNav[4], primaryNav[6], primaryNav[7], primaryNav[8]]
 
   return (
     <div className="crm-layout">

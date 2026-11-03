@@ -1,8 +1,9 @@
-import { and, asc, count, desc, eq, ne, sum } from "drizzle-orm"
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, ne, sum } from "drizzle-orm"
 import { headers } from "next/headers"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { companies, contacts, crmTasks, deals } from "@/lib/db/schema"
+import { companies, contacts, crmTasks, deals, leadHunterSettings, leadProspects, leadResearchCandidates, leadResearchRuns } from "@/lib/db/schema"
+import type { LeadResearchEvidence, LeadResearchOverview, LeadResearchStatus, LeadResearchSourceType } from "@/lib/lead-research-types"
 
 export async function getCurrentUser() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -108,6 +109,116 @@ export async function getTasks(userId: string) {
     .orderBy(asc(crmTasks.dueDate))
 
   return rows.map((task) => ({ ...task, dueDate: task.dueDate?.toISOString() ?? null }))
+}
+
+export async function getLeadHunterData(userId: string) {
+  const [rows, settings] = await Promise.all([
+    db.select({
+      id: leadProspects.id,
+      companyName: leadProspects.companyName,
+      website: leadProspects.website,
+      websiteDomain: leadProspects.websiteDomain,
+      industry: leadProspects.industry,
+      region: leadProspects.region,
+      publicEmail: leadProspects.publicEmail,
+      publicPhone: leadProspects.publicPhone,
+      publicTelegramUrl: leadProspects.publicTelegramUrl,
+      sourceUrl: leadProspects.sourceUrl,
+      sourceType: leadProspects.sourceType,
+      status: leadProspects.status,
+      potentialScore: leadProspects.potentialScore,
+      notes: leadProspects.notes,
+      discoveredAt: leadProspects.discoveredAt,
+      verifiedAt: leadProspects.verifiedAt,
+      companyId: leadProspects.companyId,
+    }).from(leadProspects).where(eq(leadProspects.userId, userId)).orderBy(desc(leadProspects.discoveredAt)),
+    db.select({ dailyTarget: leadHunterSettings.dailyTarget }).from(leadHunterSettings)
+      .where(eq(leadHunterSettings.userId, userId)).limit(1),
+  ])
+
+  return {
+    leads: rows.map((lead) => ({
+      ...lead,
+      sourceType: lead.sourceType as "company_site" | "licensed_directory",
+      status: lead.status as "new" | "verified" | "qualified" | "rejected" | "converted",
+      discoveredAt: lead.discoveredAt.toISOString(),
+      verifiedAt: lead.verifiedAt?.toISOString() ?? null,
+    })),
+    dailyTarget: settings[0]?.dailyTarget ?? 20,
+  }
+}
+
+export async function getLeadResearchData(userId: string): Promise<LeadResearchOverview> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+  const [rows, queued, analyzed, promising, proposals, usage] = await Promise.all([
+    db.select({
+      id: leadResearchCandidates.id,
+      runId: leadResearchCandidates.runId,
+      companyName: leadResearchCandidates.companyName,
+      sourceUrl: leadResearchCandidates.sourceUrl,
+      websiteDomain: leadResearchCandidates.websiteDomain,
+      sourceTitle: leadResearchCandidates.sourceTitle,
+      sourceType: leadResearchCandidates.sourceType,
+      sourceRetrievedAt: leadResearchCandidates.sourceRetrievedAt,
+      summary: leadResearchCandidates.summary,
+      industry: leadResearchCandidates.industry,
+      region: leadResearchCandidates.region,
+      fitScore: leadResearchCandidates.fitScore,
+      fitRationale: leadResearchCandidates.fitRationale,
+      evidence: leadResearchCandidates.evidence,
+      proposalDraft: leadResearchCandidates.proposalDraft,
+      status: leadResearchCandidates.status,
+      errorMessage: leadResearchCandidates.errorMessage,
+      analyzedAt: leadResearchCandidates.analyzedAt,
+      leadProspectId: leadResearchCandidates.leadProspectId,
+      createdAt: leadResearchCandidates.createdAt,
+      updatedAt: leadResearchCandidates.updatedAt,
+    }).from(leadResearchCandidates)
+      .where(eq(leadResearchCandidates.userId, userId))
+      .orderBy(desc(leadResearchCandidates.createdAt))
+      .limit(100),
+    db.select({ total: count() }).from(leadResearchCandidates).where(and(
+      eq(leadResearchCandidates.userId, userId),
+      inArray(leadResearchCandidates.status, ["pending", "analyzing", "failed"]),
+    )),
+    db.select({ total: count() }).from(leadResearchCandidates).where(and(
+      eq(leadResearchCandidates.userId, userId),
+      inArray(leadResearchCandidates.status, ["analyzed", "saved"]),
+    )),
+    db.select({ total: count() }).from(leadResearchCandidates).where(and(
+      eq(leadResearchCandidates.userId, userId),
+      gte(leadResearchCandidates.fitScore, 80),
+      ne(leadResearchCandidates.status, "rejected"),
+    )),
+    db.select({ total: count() }).from(leadResearchCandidates).where(and(
+      eq(leadResearchCandidates.userId, userId),
+      isNotNull(leadResearchCandidates.proposalDraft),
+    )),
+    db.select({ total: sum(leadResearchRuns.requestedCount) }).from(leadResearchRuns).where(and(
+      eq(leadResearchRuns.userId, userId),
+      gte(leadResearchRuns.createdAt, since),
+    )),
+  ])
+
+  return {
+    candidates: rows.map((candidate) => ({
+      ...candidate,
+      sourceType: candidate.sourceType as LeadResearchSourceType,
+      status: candidate.status as LeadResearchStatus,
+      evidence: (candidate.evidence ?? []) as LeadResearchEvidence[],
+      sourceRetrievedAt: candidate.sourceRetrievedAt?.toISOString() ?? null,
+      analyzedAt: candidate.analyzedAt?.toISOString() ?? null,
+      createdAt: candidate.createdAt.toISOString(),
+      updatedAt: candidate.updatedAt.toISOString(),
+    })),
+    stats: {
+      queued: queued[0]?.total ?? 0,
+      analyzed: analyzed[0]?.total ?? 0,
+      promising: promising[0]?.total ?? 0,
+      proposals: proposals[0]?.total ?? 0,
+    },
+    usageLast24Hours: Number(usage[0]?.total ?? 0),
+  }
 }
 
 export async function getReportData(userId: string) {

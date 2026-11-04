@@ -1,13 +1,13 @@
 "use server"
 
 import { randomUUID } from "node:crypto"
-import { and, eq, or } from "drizzle-orm"
+import { and, eq, isNotNull, or } from "drizzle-orm"
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { companies, leadHunterSettings, leadProspectCommunications, leadProspects } from "@/lib/db/schema"
+import { companies, leadHunterSettings, leadProspectCommunications, leadProspects, telegramDiscoverySessions } from "@/lib/db/schema"
 
 const httpUrl = z.string().trim().url().max(2048).refine((value) => {
   try {
@@ -186,21 +186,31 @@ export async function saveLeadHunterTarget(value: unknown) {
 export async function saveLeadHunterPreferences(input: unknown) {
   const parsed = z.object({
     dailySearchEnabled: z.boolean(),
+    telegramDiscoveryEnabled: z.boolean(),
     searchCountries: z.array(z.enum(["RU", "KZ", "BY", "AM", "KG", "UZ", "AZ", "MD", "TJ"])).min(1).max(9),
     searchCategories: z.array(z.enum(["lingerie", "intimate", "cosmetics", "lifestyle", "gifts", "events"])).min(1).max(6),
   }).safeParse(input)
   if (!parsed.success) return inputError()
 
   const userId = await getUserId()
+  if (parsed.data.telegramDiscoveryEnabled) {
+    const [account] = await db.select({ userId: telegramDiscoverySessions.userId })
+      .from(telegramDiscoverySessions)
+      .where(and(eq(telegramDiscoverySessions.userId, userId), isNotNull(telegramDiscoverySessions.sessionCiphertext)))
+      .limit(1)
+    if (!account) return { ok: false as const, error: "Сначала подключите Telegram-аккаунт для ежедневного поиска." }
+  }
   await db.insert(leadHunterSettings).values({
     id: randomUUID(), userId,
     dailySearchEnabled: parsed.data.dailySearchEnabled,
+    telegramDiscoveryEnabled: parsed.data.telegramDiscoveryEnabled,
     searchCountries: [...new Set(parsed.data.searchCountries)],
     searchCategories: [...new Set(parsed.data.searchCategories)],
   }).onConflictDoUpdate({
     target: leadHunterSettings.userId,
     set: {
       dailySearchEnabled: parsed.data.dailySearchEnabled,
+      telegramDiscoveryEnabled: parsed.data.telegramDiscoveryEnabled,
       searchCountries: [...new Set(parsed.data.searchCountries)],
       searchCategories: [...new Set(parsed.data.searchCategories)],
       updatedAt: new Date(),

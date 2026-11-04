@@ -14,7 +14,7 @@ import {
   telegramSettings,
   user as authUsers,
 } from "@/lib/db/schema"
-import { configureTelegramWebhook, generateTelegramReplyDraft, sendTelegramMessage } from "@/lib/telegram/server"
+import { configureTelegramWebhook, sendTelegramMessage } from "@/lib/telegram/server"
 
 const idSchema = z.string().uuid()
 const draftSchema = z.object({
@@ -148,32 +148,6 @@ export async function rejectTelegramDraft(draftId: string) {
   if (!updated) return { ok: false as const, error: "Черновик уже обработан или недоступен." }
   refreshTelegramPages()
   return { ok: true as const, message: "Черновик отклонён. Сообщение не отправлено." }
-}
-
-export async function regenerateTelegramDraft(draftId: string) {
-  if (!idSchema.safeParse(draftId).success) return { ok: false as const, error: "Некорректный черновик." }
-  const userId = await getAuthenticatedUserId()
-  if (!userId) return { ok: false as const, error: "Сессия завершилась. Войдите снова." }
-  if (!(await isTelegramOwner(userId))) return { ok: false as const, error: "Нет доступа к этому черновику." }
-
-  const [draft] = await db.select({
-    id: telegramReplyDrafts.id,
-    conversationId: telegramReplyDrafts.conversationId,
-    inboundMessageId: telegramReplyDrafts.inboundMessageId,
-    reviewedAt: telegramReplyDrafts.reviewedAt,
-  }).from(telegramReplyDrafts).where(and(
-    eq(telegramReplyDrafts.id, draftId),
-    eq(telegramReplyDrafts.userId, userId),
-    eq(telegramReplyDrafts.status, "failed"),
-    isNull(telegramReplyDrafts.reviewedAt),
-  )).limit(1)
-
-  if (!draft) return { ok: false as const, error: "Черновик уже обработан или недоступен." }
-  const result = await generateTelegramReplyDraft(userId, draft.conversationId, draft.inboundMessageId)
-  refreshTelegramPages()
-  return result.ok
-    ? { ok: true as const, message: "Черновик готов к проверке. Он не отправлен." }
-    : { ok: false as const, error: "Не удалось создать черновик. Проверьте настройки OpenAI и попробуйте снова." }
 }
 
 export async function approveAndSendTelegramDraft(input: unknown) {

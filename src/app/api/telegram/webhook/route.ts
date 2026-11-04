@@ -1,11 +1,10 @@
 import { timingSafeEqual } from "node:crypto"
-import { after } from "next/server"
 import { revalidatePath } from "next/cache"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { db } from "@/lib/db"
 import { telegramSettings } from "@/lib/db/schema"
-import { generateTelegramReplyDraft, saveIncomingTelegramMessage } from "@/lib/telegram/server"
+import { saveIncomingTelegramMessage } from "@/lib/telegram/server"
 
 export const runtime = "nodejs"
 export const maxDuration = 30
@@ -94,12 +93,7 @@ export async function POST(request: Request) {
       sentAt: new Date(message.date * 1000),
     })
 
-    if (saved) {
-      after(async () => {
-        await generateTelegramReplyDraft(settings.userId, saved.conversationId, saved.messageId)
-        revalidatePath("/telegram")
-      })
-    }
+    if (saved) revalidatePath("/telegram")
 
     return Response.json({ ok: true })
   } catch {

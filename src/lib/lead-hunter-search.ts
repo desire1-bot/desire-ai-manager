@@ -10,6 +10,7 @@ import {
 } from "@/lib/db/schema"
 import { assertPublicResearchUrl, normalizeResearchUrl } from "@/lib/lead-research"
 import { processQueuedLeadResearch } from "@/lib/lead-research-worker"
+import { runTelegramPublicChannelSearch } from "@/lib/telegram/public-channel-search"
 import type { LeadHunterCategory, LeadHunterCountry, LeadSearchTrigger } from "@/lib/lead-research-types"
 import { leadHunterCategories, leadHunterCountries } from "@/lib/lead-hunter-options"
 
@@ -426,11 +427,19 @@ export async function runDailyLeadHunterSearches() {
     .orderBy(desc(leadHunterSettings.updatedAt))
     .limit(MAX_SCHEDULED_USERS_PER_RUN)
 
-  const results: { userId: string; search: Awaited<ReturnType<typeof runLeadHunterSearch>>; queuedForAnalysis: number }[] = []
+  const results: {
+    userId: string
+    telegramSearch: Awaited<ReturnType<typeof runTelegramPublicChannelSearch>>
+    search: Awaited<ReturnType<typeof runLeadHunterSearch>>
+    queuedForAnalysis: number
+  }[] = []
   for (const user of enabledUsers) {
+    const telegramSearch = await runTelegramPublicChannelSearch(user.userId, "scheduled", {
+      limit: Math.ceil(user.dailyTarget / 2),
+    })
     const search = await runLeadHunterSearch(user.userId, "scheduled")
     const queuedForAnalysis = await processQueuedLeadResearch(user.userId, user.dailyTarget)
-    results.push({ userId: user.userId, search, queuedForAnalysis })
+    results.push({ userId: user.userId, telegramSearch, search, queuedForAnalysis })
   }
 
   return { processedUsers: results.length, results }

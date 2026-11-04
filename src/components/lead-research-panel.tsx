@@ -58,7 +58,7 @@ const evidenceFieldLabels = {
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
 const INPUT_MAX_BYTES = 50_000
 
-export function LeadResearchPanel({ research, dailyTarget }: { research: LeadResearchOverview; dailyTarget: number }) {
+export function LeadResearchPanel({ research, dailyTarget, telegramConnected }: { research: LeadResearchOverview; dailyTarget: number; telegramConnected: boolean }) {
   const router = useRouter()
   const [input, setInput] = useState("")
   const [sourceType, setSourceType] = useState<LeadResearchSourceType>("company_site")
@@ -68,6 +68,7 @@ export function LeadResearchPanel({ research, dailyTarget }: { research: LeadRes
   const [searchCountries, setSearchCountries] = useState([...research.settings.searchCountries])
   const [searchCategories, setSearchCategories] = useState([...research.settings.searchCategories])
   const [dailySearchEnabled, setDailySearchEnabled] = useState(research.settings.dailySearchEnabled)
+  const [telegramDiscoveryEnabled, setTelegramDiscoveryEnabled] = useState(research.settings.telegramDiscoveryEnabled)
   const [searchLimit, setSearchLimit] = useState(String(dailyTarget))
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null)
   const remaining = Math.max(0, dailyTarget - research.usageLast24Hours)
@@ -77,12 +78,12 @@ export function LeadResearchPanel({ research, dailyTarget }: { research: LeadRes
     setPending(true)
     setNotice(null)
     try {
-      const result = await saveLeadHunterPreferences({ dailySearchEnabled, searchCountries, searchCategories })
+      const result = await saveLeadHunterPreferences({ dailySearchEnabled, telegramDiscoveryEnabled, searchCountries, searchCategories })
       if (!result.ok) {
         setNotice({ text: result.error, error: true })
         return
       }
-      setNotice({ text: dailySearchEnabled ? "Настройки сохранены. Автопоиск запустится завтра в 09:00 по Москве." : "Настройки сохранены. Ежедневный автопоиск выключен." })
+      setNotice({ text: dailySearchEnabled ? `Настройки сохранены. Автопоиск запустится в 09:00 по Москве${telegramDiscoveryEnabled ? ", включая публичные каналы Telegram" : ""}.` : "Настройки сохранены. Ежедневный автопоиск выключен." })
       router.refresh()
     } catch {
       setNotice({ text: "Не удалось сохранить настройки поиска.", error: true })
@@ -158,7 +159,7 @@ export function LeadResearchPanel({ research, dailyTarget }: { research: LeadRes
         <div>
           <span className="eyebrow">BRAVE SEARCH · ОФИЦИАЛЬНЫЕ САЙТЫ · ССЫЛКИ НА КАНАЛЫ</span>
           <h2 id="research-title"><Sparkles aria-hidden="true" />AI-проверка рекламодателей</h2>
-          <p>Поиск по категориям и странам через Brave Search API. AI анализирует только проверенные страницы сайтов компаний; из Telegram сохраняется ссылка на публичный канал без загрузки постов и контактов.</p>
+          <p>Brave Search собирает сайты компаний для отдельного AI-анализа. Telegram запускается отдельно, только по вашему запросу или включённому расписанию; его публикации оцениваются правилами без передачи текста модели.</p>
         </div>
         <div className="research-limit"><Clock3 aria-hidden="true" /><span>За последние 24 часа<br /><strong>{research.usageLast24Hours} / {dailyTarget}</strong> компаний</span></div>
       </div>
@@ -176,11 +177,17 @@ export function LeadResearchPanel({ research, dailyTarget }: { research: LeadRes
 
       <form className="research-config" onSubmit={handlePreferencesSave}>
         <div className="research-config-header">
-          <div><h3><Search aria-hidden="true" />Поиск по категориям и странам</h3><p>Реальные результаты Brave Search API; до 10 поисковых запросов за запуск.</p></div>
-          <label className="research-schedule-toggle">
-            <input type="checkbox" checked={dailySearchEnabled} onChange={(event) => setDailySearchEnabled(event.target.checked)} />
-            <span><strong>Ежедневно</strong><small>09:00 · Москва</small></span>
-          </label>
+          <div><h3><Search aria-hidden="true" />Поиск по категориям и странам</h3><p>Реальные результаты Brave Search API; до 10 запросов за запуск.</p></div>
+          <div className="research-schedule-toggles">
+            <label className="research-schedule-toggle">
+              <input type="checkbox" checked={dailySearchEnabled} onChange={(event) => setDailySearchEnabled(event.target.checked)} />
+              <span><strong>Ежедневно</strong><small>09:00 · Москва</small></span>
+            </label>
+            <label className="research-schedule-toggle research-telegram-toggle">
+              <input type="checkbox" checked={telegramDiscoveryEnabled} disabled={!telegramConnected} onChange={(event) => setTelegramDiscoveryEnabled(event.target.checked)} />
+              <span><strong>Telegram</strong><small>{telegramConnected ? "публичные каналы" : "сначала подключите аккаунт"}</small></span>
+            </label>
+          </div>
         </div>
         <div className="research-option-groups">
           <fieldset className="research-option-group">
@@ -216,7 +223,7 @@ export function LeadResearchPanel({ research, dailyTarget }: { research: LeadRes
             </button>
           </div>
         </div>
-        <p className="research-footnote">Автопоиск выключен, пока вы явно его не включите. Он добавляет компании в сохраняемую очередь и обрабатывает не более дневного лимита. Email/телефоны извлекаются только с официальных сайтов. Для Telegram сохраняется только публичная ссылка.</p>
+        <p className="research-footnote">Автопоиск выключен, пока вы явно его не включите. Источники Telegram добавляются в общий лимит только при отдельном включении и подключённом аккаунте; публикации не сохраняются целиком и не передаются AI.</p>
       </form>
 
       <details className="research-history">

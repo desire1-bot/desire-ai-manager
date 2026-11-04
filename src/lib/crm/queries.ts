@@ -133,6 +133,7 @@ export async function getLeadHunterData(userId: string) {
       status: leadProspects.status,
       potentialScore: leadProspects.potentialScore,
       notes: leadProspects.notes,
+      telegramInsights: leadProspects.telegramInsights,
       discoveredAt: leadProspects.discoveredAt,
       verifiedAt: leadProspects.verifiedAt,
       companyId: leadProspects.companyId,
@@ -161,8 +162,8 @@ export async function getLeadHunterData(userId: string) {
   return {
     leads: rows.map((lead) => ({
       ...lead,
-      sourceType: lead.sourceType as "company_site" | "licensed_directory",
-      sourceProvider: lead.sourceProvider as "manual" | "brave_search",
+      sourceType: lead.sourceType as "company_site" | "licensed_directory" | "telegram_public_channel",
+      sourceProvider: lead.sourceProvider as "manual" | "brave_search" | "telegram_mtproto",
       searchCountry: lead.searchCountry as LeadHunterCountry | null,
       status: lead.status as "new" | "verified" | "qualified" | "rejected" | "converted",
       pipelineStage: lead.pipelineStage as "new" | "analyzed" | "priority" | "proposal_prepared" | "sent" | "replied" | "negotiating" | "partnered" | "refused",
@@ -273,6 +274,7 @@ export async function getLeadResearchData(userId: string): Promise<LeadResearchO
       .orderBy(desc(leadHunterSearchRuns.createdAt)).limit(20),
     db.select({
       dailySearchEnabled: leadHunterSettings.dailySearchEnabled,
+      telegramDiscoveryEnabled: leadHunterSettings.telegramDiscoveryEnabled,
       searchCountries: leadHunterSettings.searchCountries,
       searchCategories: leadHunterSettings.searchCategories,
     }).from(leadHunterSettings).where(eq(leadHunterSettings.userId, userId)).limit(1),
@@ -312,6 +314,7 @@ export async function getLeadResearchData(userId: string): Promise<LeadResearchO
     })),
     settings: {
       dailySearchEnabled: settings[0]?.dailySearchEnabled ?? false,
+      telegramDiscoveryEnabled: settings[0]?.telegramDiscoveryEnabled ?? false,
       searchCountries: (settings[0]?.searchCountries as LeadHunterCountry[] | undefined) ?? ["RU"],
       searchCategories: (settings[0]?.searchCategories as LeadHunterCategory[] | undefined) ?? ["lingerie", "intimate", "cosmetics", "lifestyle", "gifts", "events"],
     },

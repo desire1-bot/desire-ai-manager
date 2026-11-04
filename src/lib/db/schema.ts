@@ -104,6 +104,20 @@ export const crmTasks = pgTable("crm_tasks", {
   updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
 })
 
+export type TelegramLeadInsights = {
+  channelId: string
+  channelUsername: string
+  sourcePostUrl: string
+  observedAdPosts: number
+  recentAdPosts: number
+  lastObservedAt: string
+  relevanceScore: number
+  cooperationScore: number
+  activityScore: number
+  budgetPotential: "unknown" | "low" | "medium" | "high"
+  signals: string[]
+}
+
 export const leadProspects = pgTable("lead_prospects", {
   id: text("id").primaryKey(),
   userId: text("userId").notNull(),
@@ -125,6 +139,7 @@ export const leadProspects = pgTable("lead_prospects", {
   status: text("status").notNull().default("new"),
   potentialScore: integer("potentialScore").notNull().default(50),
   notes: text("notes"),
+  telegramInsights: jsonb("telegramInsights").$type<TelegramLeadInsights>(),
   discoveredAt: timestamp("discoveredAt", { withTimezone: true }).notNull().defaultNow(),
   verifiedAt: timestamp("verifiedAt", { withTimezone: true }),
   companyId: text("companyId"),
@@ -143,9 +158,11 @@ export const leadHunterSettings = pgTable("lead_hunter_settings", {
   userId: text("userId").notNull().unique(),
   dailyTarget: integer("dailyTarget").notNull().default(20),
   dailySearchEnabled: boolean("dailySearchEnabled").notNull().default(false),
+  telegramDiscoveryEnabled: boolean("telegramDiscoveryEnabled").notNull().default(false),
   searchCountries: jsonb("searchCountries").$type<string[]>().notNull().default(["RU"]),
   searchCategories: jsonb("searchCategories").$type<string[]>().notNull().default(["lingerie", "intimate", "cosmetics", "lifestyle", "gifts", "events"]),
   lastAutomatedSearchDate: text("lastAutomatedSearchDate"),
+  lastTelegramAutomatedSearchDate: text("lastTelegramAutomatedSearchDate"),
   createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
@@ -261,6 +278,22 @@ export const leadProspectCommunications = pgTable("lead_prospect_communications"
   index("lead_prospect_communications_user_prospect_created_idx").on(table.userId, table.leadProspectId, table.createdAt),
   check("lead_prospect_communications_channel_check", sql`${table.channel} in ('email', 'telegram')`),
   check("lead_prospect_communications_status_check", sql`${table.status} in ('draft', 'sent', 'received')`),
+])
+
+export const telegramDiscoverySessions = pgTable("telegram_discovery_sessions", {
+  userId: text("userId").primaryKey(),
+  sessionCiphertext: text("sessionCiphertext"),
+  pendingAuthCiphertext: text("pendingAuthCiphertext"),
+  accountId: text("accountId"),
+  accountUsername: text("accountUsername"),
+  connectedAt: timestamp("connectedAt", { withTimezone: true }),
+  lastCodeRequestedAt: timestamp("lastCodeRequestedAt", { withTimezone: true }),
+  failureWindowStartedAt: timestamp("failureWindowStartedAt", { withTimezone: true }),
+  failedAttempts: integer("failedAttempts").notNull().default(0),
+  createdAt: timestamp("createdAt", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("telegram_discovery_sessions_failed_attempts_check", sql`${table.failedAttempts} between 0 and 5`),
 ])
 
 export const telegramSettings = pgTable("telegram_settings", {

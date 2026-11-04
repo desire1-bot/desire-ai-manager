@@ -96,6 +96,7 @@ export type LeadResearchOverview = {
   searchRuns: LeadHunterSearchRunView[]
   settings: {
     dailySearchEnabled: boolean
+    telegramDiscoveryEnabled: boolean
     searchCountries: LeadHunterCountry[]
     searchCategories: LeadHunterCategory[]
   }

@@ -21,6 +21,8 @@ import {
   X,
 } from "lucide-react"
 import { LeadResearchPanel } from "@/components/lead-research-panel"
+import { TelegramDiscoveryPanel } from "@/components/telegram-discovery-panel"
+import type { TelegramLeadInsights } from "@/lib/db/schema"
 import { leadHunterCategories, leadHunterCountries } from "@/lib/lead-hunter-options"
 import type { LeadCommunicationChannel, LeadCommunicationStatus, LeadPipelineStage, LeadResearchOverview } from "@/lib/lead-research-types"
 import {
@@ -34,8 +36,9 @@ import {
 } from "@/app/actions/leads"
 
 type LeadStatus = "new" | "verified" | "qualified" | "rejected" | "converted"
-type SourceType = "company_site" | "licensed_directory"
+type SourceType = "company_site" | "licensed_directory" | "telegram_public_channel"
 type Communication = { id: string; channel: LeadCommunicationChannel; status: LeadCommunicationStatus; body: string; createdAt: string }
+type TelegramDiscoveryStatus = { connected: boolean; loginPending: boolean; accountUsername: string | null; connectedAt: string | null }
 export type LeadProspect = {
   id: string
   companyName: string
@@ -49,7 +52,8 @@ export type LeadProspect = {
   publicInstagramUrl: string | null
   sourceUrl: string
   sourceType: SourceType
-  sourceProvider: "manual" | "brave_search"
+  sourceProvider: "manual" | "brave_search" | "telegram_mtproto"
+  telegramInsights: TelegramLeadInsights | null
   searchCategory: string | null
   searchCountry: string | null
   pipelineStage: LeadPipelineStage
@@ -62,7 +66,7 @@ export type LeadProspect = {
   companyId: string | null
 }
 
-type Props = { leads: LeadProspect[]; dailyTarget: number; research: LeadResearchOverview }
+type Props = { leads: LeadProspect[]; dailyTarget: number; research: LeadResearchOverview; telegramStatus: TelegramDiscoveryStatus }
 type Filter = "all" | LeadPipelineStage
 
 const pipelineStageLabels: Record<LeadPipelineStage, string> = {
@@ -79,6 +83,7 @@ const pipelineStageLabels: Record<LeadPipelineStage, string> = {
 const sourceLabels: Record<SourceType, string> = {
   company_site: "Сайт компании",
   licensed_directory: "Лицензированный каталог",
+  telegram_public_channel: "Публичный канал Telegram",
 }
 const filterOptions: { value: Filter; label: string }[] = [
   { value: "all", label: "Все" },
@@ -99,7 +104,7 @@ function formatDate(value: string) {
   return dateFormat.format(new Date(value))
 }
 
-export function LeadHunter({ leads, dailyTarget, research }: Props) {
+export function LeadHunter({ leads, dailyTarget, research, telegramStatus }: Props) {
   const router = useRouter()
   const [showForm, setShowForm] = useState(false)
   const [search, setSearch] = useState("")
@@ -126,7 +131,7 @@ export function LeadHunter({ leads, dailyTarget, research }: Props) {
       const matchesCategory = categoryFilter === "all" || lead.searchCategory === categoryFilter || lead.industry === categoryLabel
       const matchesCountry = countryFilter === "all" || lead.searchCountry === countryFilter || lead.region === countryLabel
       const matchesScore = scoreFilter === "all" || scoreFilter === "high" && lead.potentialScore >= 80 || scoreFilter === "medium" && lead.potentialScore >= 50 && lead.potentialScore < 80 || scoreFilter === "low" && lead.potentialScore < 50
-      const matchesSearch = !query || [lead.companyName, lead.websiteDomain, lead.industry, lead.region, lead.publicEmail, lead.publicPhone]
+      const matchesSearch = !query || [lead.companyName, lead.websiteDomain, lead.industry, lead.region, lead.publicEmail, lead.publicPhone, lead.telegramInsights?.channelUsername]
         .some((value) => value?.toLocaleLowerCase("ru-RU").includes(query))
       return matchesStatus && matchesCategory && matchesCountry && matchesScore && matchesSearch
     })
@@ -213,10 +218,11 @@ export function LeadHunter({ leads, dailyTarget, research }: Props) {
 
       <div className="lead-compliance" role="note">
         <ShieldCheck aria-hidden="true" />
-        <span><strong>Только проверяемые источники.</strong> Brave Search API подключён с разрешением на сохранение результатов. Telegram используется только как публичная ссылка: посты и контакты из каналов не загружаются. Публичный email сам по себе не означает согласие на рекламную рассылку.</span>
+        <span><strong>Источники разделены.</strong> AI-анализ ограничен проверенными сайтами компаний. Telegram-публикации обрабатываются отдельно, rule-based и без сохранения текста; публичный контакт не означает согласие на рекламную рассылку.</span>
       </div>
 
-      <LeadResearchPanel research={research} dailyTarget={dailyTarget} />
+      <TelegramDiscoveryPanel status={telegramStatus} dailyTarget={dailyTarget} />
+      <LeadResearchPanel research={research} dailyTarget={dailyTarget} telegramConnected={telegramStatus.connected} />
 
       <section className="metric-grid" aria-label="Показатели Lead Hunter">
         <article className="metric-card">
@@ -341,7 +347,18 @@ function LeadCard({ lead, pending, onAction, onDelete }: {
         {lead.publicInstagramUrl && <div className="lead-detail"><ArrowUpRight aria-hidden="true" /><a href={lead.publicInstagramUrl} target="_blank" rel="noopener noreferrer">Instagram компании</a></div>}
       </div>
       {lead.notes && <p className="lead-note">{lead.notes}</p>}
-      <div className="lead-card-meta"><a className="lead-source-link" href={lead.sourceUrl} target="_blank" rel="noopener noreferrer">Первоисточник <ExternalLink aria-hidden="true" /></a><span className="lead-note">{sourceLabels[lead.sourceType]} · {lead.sourceProvider === "brave_search" ? "Brave Search" : "Ручной ввод"}</span><time className="lead-date" dateTime={lead.discoveredAt}>Обнаружена {formatDate(lead.discoveredAt)}</time></div>
+      {lead.telegramInsights && <section className="telegram-lead-insights" aria-label="Оценка Telegram-публикаций по правилам">
+        <div className="telegram-insights-grid">
+          <div><span>Релевантность</span><strong>{lead.telegramInsights.relevanceScore}/100</strong></div>
+          <div><span>Сигнал контакта</span><strong>{lead.telegramInsights.cooperationScore}/100</strong></div>
+          <div><span>Активность рекламы</span><strong>{lead.telegramInsights.activityScore}/100</strong></div>
+        </div>
+        <p>Обнаружено рекламных публикаций за 30 дней: <strong>{lead.telegramInsights.recentAdPosts}</strong> (минимум среди найденных совпадений).</p>
+        <p>Бюджетный потенциал: <strong>{lead.telegramInsights.budgetPotential === "high" ? "высокий" : lead.telegramInsights.budgetPotential === "medium" ? "средний" : lead.telegramInsights.budgetPotential === "low" ? "низкий" : "нет данных"}</strong>. Это прокси по частоте публикаций, не оценка фактических расходов.</p>
+        <ul>{lead.telegramInsights.signals.map((signal, index) => <li key={`${signal}-${index}`}>{signal}</li>)}</ul>
+        <a href={lead.telegramInsights.sourcePostUrl} target="_blank" rel="noopener noreferrer">Проверить последнюю публикацию <ExternalLink aria-hidden="true" /></a>
+      </section>}
+      <div className="lead-card-meta"><a className="lead-source-link" href={lead.sourceUrl} target="_blank" rel="noopener noreferrer">Первоисточник <ExternalLink aria-hidden="true" /></a><span className="lead-note">{sourceLabels[lead.sourceType]} · {lead.sourceProvider === "brave_search" ? "Brave Search" : lead.sourceProvider === "telegram_mtproto" ? "Telegram MTProto" : "Ручной ввод"}</span><time className="lead-date" dateTime={lead.discoveredAt}>Обнаружена {formatDate(lead.discoveredAt)}</time></div>
       <label className="lead-stage-editor" htmlFor={`stage-${lead.id}`}><span>Этап работы</span><select id={`stage-${lead.id}`} value={lead.pipelineStage} disabled={pending} onChange={(event) => {
         const nextStage = event.currentTarget.value as LeadPipelineStage
         onAction(lead.id, () => updateLeadPipelineStage(lead.id, nextStage), `Этап обновлён: ${pipelineStageLabels[nextStage]}.`)

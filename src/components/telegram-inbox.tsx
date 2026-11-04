@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type ReactNode } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Bot, Check, Clock3, Inbox, LockKeyhole, MessageCircle, RefreshCw, Send, ShieldCheck, X } from "lucide-react"
+import { Bot, Check, Clock3, Inbox, LockKeyhole, MessageCircle, Send, ShieldCheck, X } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle, AlertAction } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
@@ -23,7 +23,6 @@ import { Textarea } from "@/components/ui/textarea"
 import {
   approveAndSendTelegramDraft,
   claimTelegramIntegration,
-  regenerateTelegramDraft,
   registerTelegramWebhook,
   rejectTelegramDraft,
   saveTelegramDraft,
@@ -97,7 +96,7 @@ function DraftCard({ draft, onNotice }: { draft: TelegramDraft; onNotice: (messa
           variant={draft.status === "pending" ? "secondary" : "destructive"}
         >
           <span className="telegram-status-dot" data-status={draft.status === "pending" ? "ready" : "waiting"} />
-          {draft.status === "pending" ? "Ожидает проверки" : reviewed ? "Отправка не подтверждена" : "Нужен повтор"}
+          {draft.status === "pending" ? "Ожидает проверки" : reviewed ? "Отправка не подтверждена" : "Нужно написать вручную"}
         </Badge>
       </CardHeader>
       <CardContent className="telegram-draft-content">
@@ -107,22 +106,22 @@ function DraftCard({ draft, onNotice }: { draft: TelegramDraft; onNotice: (messa
         ) : (
           <FieldGroup className="telegram-draft-form">
             <Field>
-              <FieldLabel htmlFor={`telegram-draft-${draft.id}`}>Черновик ответа — отредактируйте перед отправкой</FieldLabel>
+              <FieldLabel htmlFor={`telegram-draft-${draft.id}`}>Ответ — напишите и проверьте вручную</FieldLabel>
               <Textarea
                 id={`telegram-draft-${draft.id}`}
                 className="telegram-draft-textarea"
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
                 maxLength={4000}
-                placeholder={draft.status === "failed" ? "Черновик не создан. Напишите ответ или повторите генерацию." : "Текст AI-черновика"}
+                placeholder={draft.status === "failed" ? "Напишите ответ вручную." : "Проверьте сохранённый текст перед отправкой."}
                 aria-label={`Черновик ответа для ${displayName(draft.firstName, draft.lastName)}`}
               />
-              <FieldDescription>AI не подтверждает цены, скидки и коммерческие условия.</FieldDescription>
+              <FieldDescription>Автогенерация отключена. Текст сохраняется после ручного ввода; отправка возможна только после вашего подтверждения.</FieldDescription>
             </Field>
           </FieldGroup>
         )}
         {draft.status === "failed" && !reviewed && (
-          <div className="telegram-draft-warning">Черновик не был отправлен. Можно написать ответ вручную или повторить генерацию.</div>
+          <div className="telegram-draft-warning">Ответ не генерируется автоматически. Напишите его вручную.</div>
         )}
       </CardContent>
       {!reviewed && (
@@ -131,19 +130,13 @@ function DraftCard({ draft, onNotice }: { draft: TelegramDraft; onNotice: (messa
             <Button variant="secondary" type="button" disabled={busy || body.trim().length === 0} onClick={() => run(() => saveTelegramDraft({ draftId: draft.id, body }))}>
               <Check aria-hidden="true" data-icon="inline-start" />Сохранить
             </Button>
-            {draft.status === "failed" ? (
-              <Button variant="outline" type="button" disabled={busy} onClick={() => run(() => regenerateTelegramDraft(draft.id))}>
-                <RefreshCw aria-hidden="true" data-icon="inline-start" />Повторить AI
-              </Button>
-            ) : (
-              <Button variant="default" type="button" disabled={busy || body.trim().length === 0} onClick={() => {
-                if (window.confirm("Одобрить и отправить этот отредактированный ответ в Telegram?")) {
-                  run(() => approveAndSendTelegramDraft({ draftId: draft.id, body }))
-                }
-              }}>
-                <Send aria-hidden="true" data-icon="inline-start" />Одобрить и отправить
-              </Button>
-            )}
+            <Button variant="default" type="button" disabled={busy || body.trim().length === 0} onClick={() => {
+              if (window.confirm("Отправить этот ответ в Telegram после ручной проверки?")) {
+                run(() => approveAndSendTelegramDraft({ draftId: draft.id, body }))
+              }
+            }}>
+              <Send aria-hidden="true" data-icon="inline-start" />Отправить после проверки
+            </Button>
             <Button variant="destructive" type="button" disabled={busy} onClick={() => {
               if (window.confirm("Отклонить черновик? Сообщение не будет отправлено.")) {
                 run(() => rejectTelegramDraft(draft.id))
@@ -222,7 +215,7 @@ export function TelegramInbox({ data, canConfigureWebhook, webhookEnvironment }:
           <AlertTitle><span className="telegram-status-dot" data-status={canConfigureWebhook ? "waiting" : "ready"} />Бот привязан к владельцу CRM · webhook не включён автоматически</AlertTitle>
           <AlertDescription>{canConfigureWebhook
             ? `Кнопка зарегистрирует endpoint только для этой среды (${webhookEnvironment}). Если у бота уже настроен другой URL, он не будет заменён.`
-            : "Настройка доступна после развёртывания в Vercel Preview или Production. Новые входящие сообщения только сохраняются и создают черновики."}</AlertDescription>
+            : "Настройка доступна после развёртывания в Vercel Preview или Production. Входящие сообщения сохраняются; автоматические ответы отключены."}</AlertDescription>
         </div>
         {canConfigureWebhook && (
           <AlertAction className="telegram-setup-action">
@@ -329,7 +322,7 @@ export function TelegramInbox({ data, canConfigureWebhook, webhookEnvironment }:
         <TabsContent value="drafts" className="telegram-tab-content">
           <section className="telegram-drafts" aria-label="Очередь черновиков">
             {data.drafts.length ? data.drafts.map((draft) => <DraftCard key={draft.id} draft={draft} onNotice={showNotice} />) : (
-              <Card className="card"><EmptyPanel title="Очередь пуста" description="Новые AI-черновики появятся после получения текстового сообщения." /></Card>
+              <Card className="card"><EmptyPanel title="Очередь пуста" description="Новые сообщения появятся здесь как пустые черновики для ручного ответа. Автоматическая генерация отключена." /></Card>
             )}
           </section>
         </TabsContent>

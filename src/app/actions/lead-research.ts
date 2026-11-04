@@ -6,8 +6,10 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { requireCurrentUser } from "@/lib/crm/queries"
 import { db } from "@/lib/db"
-import { leadHunterSettings, leadProspects, leadResearchCandidates, leadResearchRuns } from "@/lib/db/schema"
-import { analyzeCompanySite, assertPublicResearchUrl, LeadResearchError, parseLeadResearchInput } from "@/lib/lead-research"
+import { leadHunterSettings, leadProspectCommunications, leadProspects, leadResearchCandidates, leadResearchRuns } from "@/lib/db/schema"
+import { assertPublicResearchUrl, LeadResearchError, parseLeadResearchInput } from "@/lib/lead-research"
+import { processLeadResearchCandidateForUser } from "@/lib/lead-research-worker"
+import { runLeadHunterSearch } from "@/lib/lead-hunter-search"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const batchSchema = z.object({
@@ -17,6 +19,11 @@ const batchSchema = z.object({
 })
 const candidateIdSchema = z.string().uuid()
 const draftSchema = z.string().trim().min(1).max(3000)
+const outreachDraftsSchema = z.object({
+  proposalDraft: draftSchema,
+  emailDraft: draftSchema,
+  telegramDraft: draftSchema,
+})
 
 function validationError() {
   return { ok: false as const, error: "Проверьте URL, тип источника и подтверждение прав на обработку материалов." }
@@ -162,77 +169,32 @@ export async function createLeadResearchRun(input: unknown) {
 export async function analyzeLeadResearchCandidate(candidateId: string) {
   if (!candidateIdSchema.safeParse(candidateId).success) return validationError()
   const user = await requireCurrentUser()
-
-  const [candidate] = await db.update(leadResearchCandidates)
-    .set({ status: "analyzing", errorMessage: null, updatedAt: new Date() })
-    .where(and(
-      eq(leadResearchCandidates.id, candidateId),
-      eq(leadResearchCandidates.userId, user.id),
-      inArray(leadResearchCandidates.status, ["pending", "failed"]),
-    ))
-    .returning({
-      id: leadResearchCandidates.id,
-      runId: leadResearchCandidates.runId,
-      sourceUrl: leadResearchCandidates.sourceUrl,
-      websiteDomain: leadResearchCandidates.websiteDomain,
-      companyName: leadResearchCandidates.companyName,
-    })
-
-  if (!candidate) {
-    const [existing] = await db.select({ status: leadResearchCandidates.status })
-      .from(leadResearchCandidates)
-      .where(and(eq(leadResearchCandidates.id, candidateId), eq(leadResearchCandidates.userId, user.id)))
-      .limit(1)
-    if (!existing) return { ok: false as const, error: "Карточка исследования не найдена." }
-    return { ok: false as const, error: "Эта карточка уже обрабатывается или не ожидает анализа." }
-  }
-
-  try {
-    const analysis = await analyzeCompanySite({
-      sourceUrl: candidate.sourceUrl,
-      websiteDomain: candidate.websiteDomain,
-      companyName: candidate.companyName,
-    })
-    await db.update(leadResearchCandidates).set({
-      companyName: analysis.companyName,
-      sourceTitle: analysis.sourceTitle,
-      sourceRetrievedAt: analysis.sourceRetrievedAt,
-      summary: analysis.summary,
-      industry: analysis.industry,
-      region: analysis.region,
-      fitScore: analysis.fitScore,
-      fitRationale: analysis.fitRationale,
-      evidence: analysis.evidence,
-      proposalDraft: analysis.proposalDraft,
-      status: "analyzed",
-      errorMessage: null,
-      modelId: analysis.modelId,
-      analyzedAt: new Date(),
-      updatedAt: new Date(),
-    }).where(and(eq(leadResearchCandidates.id, candidate.id), eq(leadResearchCandidates.userId, user.id)))
-
-    await refreshRunStatus(user.id, candidate.runId)
-    revalidatePath("/leads")
-    return { ok: true as const }
-  } catch (error) {
-    const message = error instanceof LeadResearchError
-      ? error.message
-      : "Бесплатная AI-модель временно недоступна; платный резервный маршрут не используется."
-    await db.update(leadResearchCandidates).set({
-      status: "failed",
-      errorMessage: message.slice(0, 500),
-      updatedAt: new Date(),
-    }).where(and(eq(leadResearchCandidates.id, candidate.id), eq(leadResearchCandidates.userId, user.id)))
-    revalidatePath("/leads")
-    return { ok: false as const, error: message }
-  }
+  return processLeadResearchCandidateForUser(user.id, candidateId)
 }
 
-export async function saveLeadResearchDraft(candidateId: string, proposalDraft: string) {
-  if (!candidateIdSchema.safeParse(candidateId).success || !draftSchema.safeParse(proposalDraft).success) return validationError()
+export async function startLeadHunterSearch(input: unknown) {
+  const user = await requireCurrentUser()
+  const parsed = z.object({
+    categories: z.array(z.enum(["lingerie", "intimate", "cosmetics", "lifestyle", "gifts", "events"])).min(1).max(6),
+    countries: z.array(z.enum(["RU", "KZ", "BY", "AM", "KG", "UZ", "AZ", "MD", "TJ"])).min(1).max(9),
+    limit: z.coerce.number().int().min(1).max(50),
+  }).safeParse(input)
+  if (!parsed.success) return validationError()
+
+  const result = await runLeadHunterSearch(user.id, "manual", parsed.data)
+  revalidatePath("/leads")
+  return result
+}
+
+export async function saveLeadResearchDraft(candidateId: string, input: unknown) {
+  if (!candidateIdSchema.safeParse(candidateId).success) return validationError()
+  const drafts = outreachDraftsSchema.safeParse(input)
+  if (!drafts.success) return validationError()
   const user = await requireCurrentUser()
   const [updated] = await db.update(leadResearchCandidates).set({
-    proposalDraft: proposalDraft.trim(),
+    proposalDraft: drafts.data.proposalDraft.trim(),
+    emailDraft: drafts.data.emailDraft.trim(),
+    telegramDraft: drafts.data.telegramDraft.trim(),
     updatedAt: new Date(),
   }).where(and(
     eq(leadResearchCandidates.id, candidateId),
@@ -245,8 +207,10 @@ export async function saveLeadResearchDraft(candidateId: string, proposalDraft: 
   return { ok: true as const }
 }
 
-export async function saveLeadResearchCandidate(candidateId: string, proposalDraft: string) {
-  if (!candidateIdSchema.safeParse(candidateId).success || !draftSchema.safeParse(proposalDraft).success) return validationError()
+export async function saveLeadResearchCandidate(candidateId: string, input: unknown) {
+  if (!candidateIdSchema.safeParse(candidateId).success) return validationError()
+  const drafts = outreachDraftsSchema.safeParse(input)
+  if (!drafts.success) return validationError()
   const user = await requireCurrentUser()
 
   const result = await db.transaction(async (tx) => {
@@ -256,7 +220,7 @@ export async function saveLeadResearchCandidate(candidateId: string, proposalDra
       eq(leadResearchCandidates.userId, user.id),
       eq(leadResearchCandidates.status, "analyzed"),
     )).limit(1)
-    if (!candidate || !candidate.fitScore || !candidate.companyName) {
+    if (!candidate || candidate.fitScore == null || !candidate.companyName) {
       return { ok: false as const, error: "Карточка ещё не готова к сохранению в Lead Hunter." }
     }
 
@@ -269,10 +233,11 @@ export async function saveLeadResearchCandidate(candidateId: string, proposalDra
     if (!leadProspectId) {
       const siteUrl = new URL(candidate.sourceUrl)
       const notes = [
-        "AI-анализ — черновик, проверьте первоисточник вручную.",
+        "AI-анализ и оценки — черновик; перед квалификацией проверьте первоисточник вручную.",
         candidate.summary ? `Кратко: ${candidate.summary}` : "",
         candidate.fitRationale ? `Соответствие: ${candidate.fitRationale}` : "",
-        `Источник: ${candidate.sourceUrl}`,
+        `Потенциал спонсорства: ${candidate.sponsorshipPotential ?? "нет данных"}/100; бартер: ${candidate.barterPotential ?? "нет данных"}/100; денежное: ${candidate.cashPotential ?? "нет данных"}/100; интерес к рекламе: ${candidate.advertisingFit ?? "нет данных"}/100. Это эвристики AI, а не подтверждённый бюджет или намерение.`,
+        `Источник: ${candidate.sourceFinalUrl ?? candidate.sourceUrl}`,
       ].filter(Boolean).join("\n").slice(0, 1000)
       const [inserted] = await tx.insert(leadProspects).values({
         id: randomUUID(),
@@ -282,9 +247,16 @@ export async function saveLeadResearchCandidate(candidateId: string, proposalDra
         websiteDomain: candidate.websiteDomain,
         industry: candidate.industry,
         region: candidate.region,
-        sourceUrl: candidate.sourceUrl,
+        publicEmail: candidate.publicEmail,
+        publicPhone: candidate.publicPhone,
+        publicInstagramUrl: candidate.instagramUrl,
+        sourceUrl: candidate.sourceFinalUrl ?? candidate.sourceUrl,
         sourceType: candidate.sourceType,
+        sourceProvider: candidate.sourceProvider,
+        searchCategory: candidate.searchCategory,
+        searchCountry: candidate.searchCountry,
         status: "new",
+        pipelineStage: candidate.fitScore >= 80 ? "priority" : "new",
         potentialScore: candidate.fitScore,
         notes,
       }).onConflictDoNothing().returning({ id: leadProspects.id })
@@ -302,10 +274,17 @@ export async function saveLeadResearchCandidate(candidateId: string, proposalDra
 
     await tx.update(leadResearchCandidates).set({
       status: "saved",
-      proposalDraft: proposalDraft.trim(),
+      proposalDraft: drafts.data.proposalDraft.trim(),
+      emailDraft: drafts.data.emailDraft.trim(),
+      telegramDraft: drafts.data.telegramDraft.trim(),
       leadProspectId,
       updatedAt: new Date(),
     }).where(and(eq(leadResearchCandidates.id, candidate.id), eq(leadResearchCandidates.userId, user.id)))
+
+    await tx.insert(leadProspectCommunications).values([
+      { id: randomUUID(), userId: user.id, leadProspectId, channel: "email", status: "draft", body: drafts.data.emailDraft.trim() },
+      { id: randomUUID(), userId: user.id, leadProspectId, channel: "telegram", status: "draft", body: drafts.data.telegramDraft.trim() },
+    ])
 
     return { ok: true as const, reused: Boolean(existing), runId: candidate.runId }
   })

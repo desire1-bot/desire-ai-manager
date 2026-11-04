@@ -2,8 +2,8 @@ import { and, asc, count, desc, eq, gte, inArray, isNotNull, ne, sum } from "dri
 import { headers } from "next/headers"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { companies, contacts, crmTasks, deals, leadHunterSettings, leadProspects, leadResearchCandidates, leadResearchRuns } from "@/lib/db/schema"
-import type { LeadResearchEvidence, LeadResearchOverview, LeadResearchStatus, LeadResearchSourceType } from "@/lib/lead-research-types"
+import { companies, contacts, crmTasks, deals, leadHunterSearchRuns, leadHunterSettings, leadProspectCommunications, leadProspects, leadResearchCandidates, leadResearchRuns } from "@/lib/db/schema"
+import type { LeadHunterCategory, LeadHunterCountry, LeadResearchEvidence, LeadResearchOverview, LeadResearchSourceCheckStatus, LeadResearchStatus, LeadResearchSourceType } from "@/lib/lead-research-types"
 
 export async function getCurrentUser() {
   const session = await auth.api.getSession({ headers: await headers() })
@@ -112,7 +112,7 @@ export async function getTasks(userId: string) {
 }
 
 export async function getLeadHunterData(userId: string) {
-  const [rows, settings] = await Promise.all([
+  const [rows, settings, communicationRows] = await Promise.all([
     db.select({
       id: leadProspects.id,
       companyName: leadProspects.companyName,
@@ -123,24 +123,56 @@ export async function getLeadHunterData(userId: string) {
       publicEmail: leadProspects.publicEmail,
       publicPhone: leadProspects.publicPhone,
       publicTelegramUrl: leadProspects.publicTelegramUrl,
+      publicInstagramUrl: leadProspects.publicInstagramUrl,
       sourceUrl: leadProspects.sourceUrl,
       sourceType: leadProspects.sourceType,
+      sourceProvider: leadProspects.sourceProvider,
+      searchCategory: leadProspects.searchCategory,
+      searchCountry: leadProspects.searchCountry,
+      pipelineStage: leadProspects.pipelineStage,
       status: leadProspects.status,
       potentialScore: leadProspects.potentialScore,
       notes: leadProspects.notes,
+      telegramInsights: leadProspects.telegramInsights,
       discoveredAt: leadProspects.discoveredAt,
       verifiedAt: leadProspects.verifiedAt,
       companyId: leadProspects.companyId,
     }).from(leadProspects).where(eq(leadProspects.userId, userId)).orderBy(desc(leadProspects.discoveredAt)),
     db.select({ dailyTarget: leadHunterSettings.dailyTarget }).from(leadHunterSettings)
       .where(eq(leadHunterSettings.userId, userId)).limit(1),
+    db.select({
+      id: leadProspectCommunications.id,
+      leadProspectId: leadProspectCommunications.leadProspectId,
+      channel: leadProspectCommunications.channel,
+      status: leadProspectCommunications.status,
+      body: leadProspectCommunications.body,
+      createdAt: leadProspectCommunications.createdAt,
+    }).from(leadProspectCommunications)
+      .where(eq(leadProspectCommunications.userId, userId))
+      .orderBy(desc(leadProspectCommunications.createdAt))
+      .limit(500),
   ])
+  const communicationsByLead = new Map<string, typeof communicationRows>()
+  for (const communication of communicationRows) {
+    const existing = communicationsByLead.get(communication.leadProspectId) ?? []
+    existing.push(communication)
+    communicationsByLead.set(communication.leadProspectId, existing)
+  }
 
   return {
     leads: rows.map((lead) => ({
       ...lead,
-      sourceType: lead.sourceType as "company_site" | "licensed_directory",
+      sourceType: lead.sourceType as "company_site" | "licensed_directory" | "telegram_public_channel",
+      sourceProvider: lead.sourceProvider as "manual" | "brave_search" | "telegram_mtproto",
+      searchCountry: lead.searchCountry as LeadHunterCountry | null,
       status: lead.status as "new" | "verified" | "qualified" | "rejected" | "converted",
+      pipelineStage: lead.pipelineStage as "new" | "analyzed" | "priority" | "proposal_prepared" | "sent" | "replied" | "negotiating" | "partnered" | "refused",
+      communications: (communicationsByLead.get(lead.id) ?? []).map((communication) => ({
+        ...communication,
+        channel: communication.channel as "email" | "telegram",
+        status: communication.status as "draft" | "sent" | "received",
+        createdAt: communication.createdAt.toISOString(),
+      })),
       discoveredAt: lead.discoveredAt.toISOString(),
       verifiedAt: lead.verifiedAt?.toISOString() ?? null,
     })),
@@ -150,7 +182,7 @@ export async function getLeadHunterData(userId: string) {
 
 export async function getLeadResearchData(userId: string): Promise<LeadResearchOverview> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-  const [rows, queued, analyzed, promising, proposals, usage] = await Promise.all([
+  const [rows, queued, analyzed, promising, recentPriority, proposals, usage, searchRuns, settings] = await Promise.all([
     db.select({
       id: leadResearchCandidates.id,
       runId: leadResearchCandidates.runId,
@@ -159,14 +191,34 @@ export async function getLeadResearchData(userId: string): Promise<LeadResearchO
       websiteDomain: leadResearchCandidates.websiteDomain,
       sourceTitle: leadResearchCandidates.sourceTitle,
       sourceType: leadResearchCandidates.sourceType,
+      sourceProvider: leadResearchCandidates.sourceProvider,
+      searchCountry: leadResearchCandidates.searchCountry,
+      searchCategory: leadResearchCandidates.searchCategory,
+      searchQuery: leadResearchCandidates.searchQuery,
+      searchResultTitle: leadResearchCandidates.searchResultTitle,
+      searchResultDescription: leadResearchCandidates.searchResultDescription,
+      publicEmail: leadResearchCandidates.publicEmail,
+      publicPhone: leadResearchCandidates.publicPhone,
+      instagramUrl: leadResearchCandidates.instagramUrl,
       sourceRetrievedAt: leadResearchCandidates.sourceRetrievedAt,
+      sourceCheckStatus: leadResearchCandidates.sourceCheckStatus,
+      sourceCheckResults: leadResearchCandidates.sourceCheckResults,
+      retryCount: leadResearchCandidates.retryCount,
+      retryable: leadResearchCandidates.retryable,
       summary: leadResearchCandidates.summary,
       industry: leadResearchCandidates.industry,
       region: leadResearchCandidates.region,
       fitScore: leadResearchCandidates.fitScore,
+      sponsorshipPotential: leadResearchCandidates.sponsorshipPotential,
+      barterPotential: leadResearchCandidates.barterPotential,
+      cashPotential: leadResearchCandidates.cashPotential,
+      advertisingFit: leadResearchCandidates.advertisingFit,
+      geographicCoverage: leadResearchCandidates.geographicCoverage,
       fitRationale: leadResearchCandidates.fitRationale,
       evidence: leadResearchCandidates.evidence,
       proposalDraft: leadResearchCandidates.proposalDraft,
+      emailDraft: leadResearchCandidates.emailDraft,
+      telegramDraft: leadResearchCandidates.telegramDraft,
       status: leadResearchCandidates.status,
       errorMessage: leadResearchCandidates.errorMessage,
       analyzedAt: leadResearchCandidates.analyzedAt,
@@ -192,20 +244,53 @@ export async function getLeadResearchData(userId: string): Promise<LeadResearchO
     )),
     db.select({ total: count() }).from(leadResearchCandidates).where(and(
       eq(leadResearchCandidates.userId, userId),
+      gte(leadResearchCandidates.fitScore, 80),
+      gte(leadResearchCandidates.analyzedAt, since),
+      ne(leadResearchCandidates.status, "rejected"),
+    )),
+    db.select({ total: count() }).from(leadResearchCandidates).where(and(
+      eq(leadResearchCandidates.userId, userId),
       isNotNull(leadResearchCandidates.proposalDraft),
     )),
     db.select({ total: sum(leadResearchRuns.requestedCount) }).from(leadResearchRuns).where(and(
       eq(leadResearchRuns.userId, userId),
       gte(leadResearchRuns.createdAt, since),
     )),
+    db.select({
+      id: leadHunterSearchRuns.id,
+      trigger: leadHunterSearchRuns.trigger,
+      searchCountry: leadHunterSearchRuns.searchCountry,
+      searchCategory: leadHunterSearchRuns.searchCategory,
+      query: leadHunterSearchRuns.query,
+      status: leadHunterSearchRuns.status,
+      requestedCount: leadHunterSearchRuns.requestedCount,
+      discoveredCount: leadHunterSearchRuns.discoveredCount,
+      duplicateCount: leadHunterSearchRuns.duplicateCount,
+      telegramLinkCount: leadHunterSearchRuns.telegramLinkCount,
+      errorMessage: leadHunterSearchRuns.errorMessage,
+      startedAt: leadHunterSearchRuns.startedAt,
+      finishedAt: leadHunterSearchRuns.finishedAt,
+    }).from(leadHunterSearchRuns).where(eq(leadHunterSearchRuns.userId, userId))
+      .orderBy(desc(leadHunterSearchRuns.createdAt)).limit(20),
+    db.select({
+      dailySearchEnabled: leadHunterSettings.dailySearchEnabled,
+      telegramDiscoveryEnabled: leadHunterSettings.telegramDiscoveryEnabled,
+      searchCountries: leadHunterSettings.searchCountries,
+      searchCategories: leadHunterSettings.searchCategories,
+    }).from(leadHunterSettings).where(eq(leadHunterSettings.userId, userId)).limit(1),
   ])
 
   return {
     candidates: rows.map((candidate) => ({
       ...candidate,
       sourceType: candidate.sourceType as LeadResearchSourceType,
+      sourceProvider: candidate.sourceProvider as "manual" | "brave_search",
+      searchCountry: candidate.searchCountry as LeadHunterCountry | null,
+      searchCategory: candidate.searchCategory as LeadHunterCategory | null,
       status: candidate.status as LeadResearchStatus,
+      sourceCheckStatus: candidate.sourceCheckStatus as LeadResearchSourceCheckStatus,
       evidence: (candidate.evidence ?? []) as LeadResearchEvidence[],
+      sourceCheckResults: candidate.sourceCheckResults ?? {},
       sourceRetrievedAt: candidate.sourceRetrievedAt?.toISOString() ?? null,
       analyzedAt: candidate.analyzedAt?.toISOString() ?? null,
       createdAt: candidate.createdAt.toISOString(),
@@ -216,6 +301,22 @@ export async function getLeadResearchData(userId: string): Promise<LeadResearchO
       analyzed: analyzed[0]?.total ?? 0,
       promising: promising[0]?.total ?? 0,
       proposals: proposals[0]?.total ?? 0,
+      recentPriority: recentPriority[0]?.total ?? 0,
+    },
+    searchRuns: searchRuns.map((run) => ({
+      ...run,
+      trigger: run.trigger as "manual" | "scheduled",
+      searchCountry: run.searchCountry as LeadHunterCountry,
+      searchCategory: run.searchCategory as LeadHunterCategory,
+      status: run.status as "running" | "completed" | "failed",
+      startedAt: run.startedAt.toISOString(),
+      finishedAt: run.finishedAt?.toISOString() ?? null,
+    })),
+    settings: {
+      dailySearchEnabled: settings[0]?.dailySearchEnabled ?? false,
+      telegramDiscoveryEnabled: settings[0]?.telegramDiscoveryEnabled ?? false,
+      searchCountries: (settings[0]?.searchCountries as LeadHunterCountry[] | undefined) ?? ["RU"],
+      searchCategories: (settings[0]?.searchCategories as LeadHunterCategory[] | undefined) ?? ["lingerie", "intimate", "cosmetics", "lifestyle", "gifts", "events"],
     },
     usageLast24Hours: Number(usage[0]?.total ?? 0),
   }
